@@ -357,3 +357,16 @@ dialog.composer::backdrop{background:rgba(10,15,20,.55)}
 .destroy-q{flex-basis:100%;font-size:12.5px;font-weight:500}
 .btn.danger{border-color:var(--warn);color:var(--warn)}
 .btn.danger:hover,.btn.danger:focus-visible{background:var(--warn);color:var(--panel)}
+
+/* hiding corp card sections */
+.sec-toggles{display:inline-flex;gap:14px;margin-left:auto;font-size:12.5px}
+.sec-toggles{align-items:center}
+details.sect>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+details.sect>summary::-webkit-details-marker{display:none}
+details.sect>summary::before{content:"▸";color:var(--faint);font-size:11px;width:10px}
+details.sect[open]>summary::before{content:"▾"}
+details.sect>summary:hover .mini,details.sect>summary:focus-visible .mini{color:var(--ink)}
+details.sect>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
+details.sect[open]>summary{margin-bottom:6px}
+details.sect:not([open]) .sect-hint{display:none}
+.techs-summary{display:inline-flex;flex-wrap:wrap;gap:4px 6px}

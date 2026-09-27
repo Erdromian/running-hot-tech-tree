@@ -36,7 +36,15 @@
   </header>
 
   <section>
-    <div class="sec-head"><h2>Where each corp stands</h2><span class="mini" id="corpNote"></span></div>
+    <div class="sec-head">
+      <h2>Where each corp stands</h2>
+      <span class="mini" id="corpNote"></span>
+      <span class="sec-toggles">
+        <span class="mini">Open on every card:</span>
+        <label class="switch" for="showTechs"><input type="checkbox" id="showTechs"> Techs</label>
+        <label class="switch" for="showUnlocked"><input type="checkbox" id="showUnlocked"> Unlocked cards</label>
+      </span>
+    </div>
     <div class="corps" id="corps"></div>
   </section>
 

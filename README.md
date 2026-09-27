@@ -50,6 +50,10 @@ Settings (remembered in the browser):
 
 The site shows whose turn it is but not when it started, so the tool times each turn from when it first sees it. While a sitting is open it checks every 2 seconds, so timings are accurate to about 2 seconds. If the tab was closed when a turn began, that turn is timed from when the tab reopened.
 
+## Tidying the corp cards
+
+Each corp card's **Techs** and **Unlocked cards** sections open and close independently: click the section's heading. A closed Techs section still shows its count and anything that needs you (techs that need a facility, copies not paid for). The **Open on every card** switches in the section heading set whether those sections start open, and are remembered in the browser. Flipping one resets any cards you've opened or closed individually.
+
 ## Hand-outs
 
 When a corp gains a tech whose effect says **Unlock: …**, the **Hand-outs** section lists what that corp is owed and hands it out:
@@ -94,7 +98,7 @@ A tech a corp holds but hasn't put in a facility shows **Needs a facility** on i
 
 Each corp card lists the **Unlocked cards** its working techs have unlocked (protection cards and equipment), with how many copies the corp holds. **Mint another** gives one more copy, into the corp's hand for protection cards or to its Security player (else CEO) for equipment. It charges half the unlocking tech's research cost, rounded up in each suit; if two techs unlock the same card, the cheaper one sets the price. The button shows the price and needs a second click to confirm. It checks the corp's current points first and won't mint if they can't afford it. After minting, it re-reads the site to confirm the new copy and logs it. Minting is deliberate, so the hand-outs' "never give twice" rule doesn't block it.
 
-**Refund one** undoes a mint. It takes back one copy of each version and refunds the same half price, with a reason in the game log. It only takes copies still in the corp's hand (or, for equipment, held by its Security player or whoever has one). If every copy is installed, uninstall one on the Facility Defence page first. Hand-outs won't re-give a card after it's taken back.
+**Refund one** undoes a mint. It takes back one copy of each version and refunds the same half price, with a reason in the game log. It takes a copy from the corp's hand if there is one. Otherwise it uninstalls the most recently installed copy (the confirm button names the facility) and takes that. Equipment comes from its Security player, or whoever on the corp holds one. It needs a copy of every version to take back, because a mint gave one of each. Hand-outs won't re-give a card after it's taken back.
 
 ## Charging or adding Research Points
 

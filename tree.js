@@ -411,6 +411,25 @@
   }
 
   // ---------- Corps ----------
+  // Which sections the corp cards show. The switches in the heading set the default for every card
+  // (remembered in the browser); each card's section can also be opened or closed on its own.
+  const show = { techs: true, unlocked: true, ...store.get('rh.corpSections', {}) };
+  const cardOpen = {};   // "corpId|section" -> true/false, for this visit
+  const isOpen = (corpId, k) => cardOpen[`${corpId}|${k}`] ?? show[k];
+  // The heading of the techs section, which stays visible when it's closed: a count, plus anything
+  // that needs attention so nothing is missed.
+  function techsSummary(c) {
+    const live = c.holdings.filter(h => h.status !== 'destroyed');
+    const unplaced = live.filter(h => needsPlace(h)).length;
+    const unpaid = live.filter(h => h.status === 'claimed').length;
+    const off = live.filter(h => !isUsable(h) && h.status !== 'claimed').length;
+    const bits = [`Techs · ${live.length}`];
+    if (unplaced) bits.push(`<span class="warnline">${unplaced} need${unplaced === 1 ? 's' : ''} a facility</span>`);
+    if (unpaid) bits.push(`<span class="warnline">${unpaid} not paid for</span>`);
+    if (off) bits.push(`${off} not working`);
+    return `<span class="techs-summary mini">${bits.join(' · ')}</span>`;
+  }
+
   // Redrawing the cards while someone is typing in one (points, Place in…) would lose their place, so
   // wait until they leave the field.
   let corpsStale = false;
@@ -471,7 +490,7 @@
       return `<article class="corp" style="${cv(c.color)}">
         <h3><span class="sw"></span>${esc(c.name)}</h3>
         <div class="pos">${beyond ? `<b>${beyond} tech${beyond === 1 ? '' : 's'} beyond the start</b>` : '<b>Starting techs only</b>'} · own tree ${ownHave}/${ownTotal} · Standard ${stdHave}/${stdTotal}${otherHave ? ` · ${otherHave} from other trees` : ''}</div>
-        <ul class="held">${held}</ul>
+        <details class="sect" data-sect="techs" data-corp="${c.id}"${isOpen(c.id, 'techs') ? ' open' : ''}><summary>${techsSummary(c)}</summary><ul class="held">${held}</ul></details>
         <div class="sub"><span class="mini">Facility space</span><span class="spacehead">${spaceHead}</span>${waitNote}<ul class="facs">${facRows || '<li><span class="n">No facilities</span></li>'}</ul></div>
         <div class="sub"><span class="mini">Research Points</span><div class="suits">${m.suits.map(s => `<span class="chip rp${c.points[s.value] ? '' : ' zero'}">${c.points[s.value] || 0} ${esc(s.label)}</span>`).join('')}</div>${rpAdjustHTML(m, c)}</div>
         ${mintHTML(c)}
@@ -488,6 +507,7 @@
     $('corps').querySelectorAll('[data-place]').forEach(b => b.addEventListener('click', () => placeHolding(b)));
     $('corps').querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () => payClick(b)));
     bindRpAdjust(m);
+    $('corps').querySelectorAll('details.sect').forEach(d => d.addEventListener('toggle', () => { cardOpen[`${d.dataset.corp}|${d.dataset.sect}`] = d.open; }));
     $('corps').querySelectorAll('[data-destroy]').forEach(b => b.addEventListener('click', () => destroyClick(b)));
     $('corps').querySelectorAll('[data-refund]').forEach(b => b.addEventListener('change', () => { const d = destroyState[b.dataset.refund]; if (d) d.refund = b.checked; }));
     $('corps').querySelectorAll('[data-mint]').forEach(b => b.addEventListener('click', () => mintClick(b)));
@@ -712,11 +732,11 @@
       const held = o.versions.length > 1 ? o.versions.map(v => `${esc(v.code)}: ${v.held}`).join(', ') : `holds ${o.held}`;
       return `<li><span class="n">${esc(o.name)}${o.versions.length > 1 ? ` <span class="mini">×${o.versions.length} versions</span>` : ''}</span><span class="f">${held}${o.kind === 'equipment' ? ` · ${esc(o.to)}` : ''}</span>
         <div class="place"><button type="button" class="btn" data-mint="${esc(o.id)}" data-corp="${c.id}"${short.length ? ' disabled' : ''} title="Half of ${esc(o.tech)}’s research cost, rounded up">${mintArmed[key] ? `Confirm: mint for ${esc(price)}` : `Mint another · ${esc(price)}`}</button>
-        <button type="button" class="btn quiet" data-unmint="${esc(o.id)}" data-corp="${c.id}"${o.removable ? '' : ` disabled title="${o.kind === 'protection' ? 'No copy in hand to take back; installed copies must be uninstalled first' : 'Nobody on the corp holds one'}"`}>${mintArmed['undo' + key] ? `Confirm: take one back, refund ${esc(price)}` : `Refund one · ${esc(price)}`}</button>
+        <button type="button" class="btn quiet" data-unmint="${esc(o.id)}" data-corp="${c.id}"${o.removable ? '' : ` disabled title="${o.kind === 'protection' ? 'They don’t hold a copy' : 'Nobody on the corp holds one'}"`}>${mintArmed['undo' + key] ? `Confirm: take one back${o.takesFrom.length ? ` (uninstalls it from ${esc([...new Set(o.takesFrom)].join(', '))})` : ''}, refund ${esc(price)}` : `Refund one · ${esc(price)}`}</button>
         ${short.length ? `<span class="place-msg bad">Short by ${esc(short.map(x => `${x.n - (c.points[x.s.value] || 0)} ${x.s.label}`).join(', '))}</span>` : ''}
         ${msg ? `<span class="place-msg ${msg.ok ? 'ok' : 'bad'}">${esc(msg.text)}</span>` : ''}</div></li>`;
     }).join('');
-    return `<div class="sub"><span class="mini">Unlocked cards · mint another for half the tech’s cost</span><ul class="held mint">${rows}</ul></div>`;
+    return `<details class="sect sub" data-sect="unlocked" data-corp="${c.id}"${isOpen(c.id, 'unlocked') ? ' open' : ''}><summary><span class="mini">Unlocked cards · ${opts.length}</span><span class="mini sect-hint">mint another for half the tech’s cost</span></summary><ul class="held mint">${rows}</ul></details>`;
   }
 
   function mintClick(btn) {
@@ -1308,6 +1328,14 @@
     if (state.model) { renderLog(); renderTrees(state.model); if (state.selected) select(state.selected, false); }
   });
   $('autoHand').addEventListener('change', () => handouts.setAuto($('autoHand').checked));
+  $('showTechs').checked = show.techs;
+  $('showUnlocked').checked = show.unlocked;
+  [['showTechs', 'techs'], ['showUnlocked', 'unlocked']].forEach(([id, k]) => $(id).addEventListener('change', () => {
+    show[k] = $(id).checked;
+    store.set('rh.corpSections', show);
+    Object.keys(cardOpen).forEach(x => { if (x.endsWith('|' + k)) delete cardOpen[x]; });
+    if (state.model) renderCorps(state.model);
+  }));
   $('newResearch').addEventListener('click', () => composer.open('new'));
   $('giveTech').addEventListener('click', () => giver.open(null, state.focusCorp));
   $('corps').addEventListener('focusout', () => setTimeout(() => {

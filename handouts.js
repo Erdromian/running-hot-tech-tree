@@ -324,6 +324,7 @@ window.RHHandouts = function createHandouts(deps) {
       const count = v => (v.kind === 'protection' ? protectionCount(corpId, v.card) : equipmentCount(corpId, v.card));
       return {
         removable: versions.every(v => removableFrom(corpId, v) !== null),
+        takesFrom: versions.map(v => { const f = removableFrom(corpId, v); return f && f.installed ? f.installed.facilityName : null; }).filter(Boolean),
         id: `${corpId}|mint:${k}`, name: first.card.name, kind: first.kind,
         versions: versions.map(v => ({ item: v, code: v.version || v.card.code || `#${v.card.id}`, held: count(v) })),
         held: versions.reduce((a, v) => a + count(v), 0),
@@ -332,13 +333,20 @@ window.RHHandouts = function createHandouts(deps) {
     });
   }
 
-  // Where one copy of a version can be taken back from: protection cards from the corp's hand
-  // (installed ones have to be uninstalled first), equipment from its Security player or whoever holds it.
+  // Where one copy of a version can be taken back from. Protection cards come from the corp's hand if
+  // there's one there; otherwise the most recently installed copy is uninstalled (which returns it to the
+  // hand) and then taken. Equipment comes from its Security player or whoever holds one.
   function removableFrom(corpId, v) {
     if (v.kind === 'protection') {
       const e = (st.aux.F.cardHoldings || []).find(h => h.corporation_id === corpId);
       const c = e && (e.cards || []).find(x => x.card_type_id === v.card.id);
-      return c && c.copies_in_hand > 0 ? { inHand: c.copies_in_hand } : null;
+      const inHand = c ? c.copies_in_hand || 0 : 0;
+      if (inHand > 0) return { inHand };
+      const corp = (st.aux.F.facilities || []).find(x => x.id === corpId);
+      const installed = ((corp && corp.facilities) || []).flatMap(f => (f.stacks || []).flatMap(s => (s.cards || [])
+        .filter(x => x.card_type_id === v.card.id).map(x => ({ facility: f.id, facilityName: f.name, cardId: x.id }))));
+      if (!installed.length) return null;
+      return { inHand: 0, installed: installed.sort((a, b) => b.cardId - a.cardId)[0] };
     }
     const holders = corpMembers(corpId).map(mb => ({ mb, n: (mb.cards || []).filter(x => x.card_type_id === v.card.id).reduce((a, x) => a + (x.copies || 1), 0) })).filter(x => x.n > 0);
     const pick = holders.find(x => v.recipient && x.mb.character_id === v.recipient.character_id) || holders[0];
@@ -354,13 +362,17 @@ window.RHHandouts = function createHandouts(deps) {
     if (!opt || !c) throw new Error('that card isn’t on their list any more.');
     const plan = opt.versions.map(v => ({ v, from: removableFrom(corpId, v.item) }));
     const stuck = plan.filter(p => !p.from);
-    if (stuck.length) throw new Error(`no copy of ${stuck.map(p => p.v.code).join(', ')} to take back: ${opt.kind === 'protection' ? 'every copy is installed. Uninstall one on the Facility Defence page first' : 'nobody on the corp holds one'}.`);
+    if (stuck.length) throw new Error(`no copy of ${stuck.map(p => p.v.code).join(', ')} to take back: ${opt.kind === 'protection' ? 'they don’t hold one' : 'nobody on the corp holds one'}.`);
     const taken = [];
     for (const { v, from } of plan) {
       try {
-        if (v.item.kind === 'protection') await post('/protection-card-holdings', { corporation_id: corpId, protection_card_type_id: v.item.card.id, copies: from.inHand - 1 }, { method: 'PATCH' });
+        if (v.item.kind === 'protection' && from.installed) {
+          // Uninstalling puts it back in their hand; then the hand goes back to what it was before.
+          await post(`/facilities/${from.installed.facility}/cards/${from.installed.cardId}`, {}, { method: 'DELETE' });
+          await post('/protection-card-holdings', { corporation_id: corpId, protection_card_type_id: v.item.card.id, copies: from.inHand }, { method: 'PATCH' });
+        } else if (v.item.kind === 'protection') await post('/protection-card-holdings', { corporation_id: corpId, protection_card_type_id: v.item.card.id, copies: from.inHand - 1 }, { method: 'PATCH' });
         else await post('/equipment-holdings', { character_id: from.character.character_id, equipment_card_type_id: v.item.card.id, copies: from.copies - 1 }, { method: 'PATCH' });
-        taken.push(v.code);
+        taken.push(from.installed ? `${v.code} from ${from.installed.facilityName}` : v.code);
       } catch (e) {
         if (!taken.length) throw e;
         throw Object.assign(new Error(`took back ${taken.join(', ')} but not ${v.code}: ${e.message} Nothing was refunded.`), { partial: true });
