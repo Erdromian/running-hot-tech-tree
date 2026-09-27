@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Hot Tech Tree (demo)</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="../../tree.css">
+</head>
+<body>
+<div class="wrap">
+<div class="main">
+  <header class="top">
+    <div class="topbar">
+      <span class="eyebrow" id="gameName">Running Hot</span>
+      <span class="live" id="live"><span class="dot"></span><span id="liveText">Connecting…</span></span>
+    </div>
+    <h1>Tech Tree</h1>
+    <div class="status" id="status"></div>
+    <form class="controls" id="controls">
+      <label for="gameUrl">Game</label>
+      <input id="gameUrl" type="url" spellcheck="false" required>
+      <label for="interval">Refresh</label>
+      <select id="interval">
+        <option value="5">every 5 s</option>
+        <option value="10">every 10 s</option>
+        <option value="30">every 30 s</option>
+        <option value="60">every minute</option>
+      </select>
+      <button type="submit" class="btn">Refresh now</button>
+      <button type="button" class="btn" id="pause">Pause</button>
+      <button type="button" class="btn" id="giveTech">Give a tech…</button>
+      <button type="button" class="btn primary" id="newResearch">New research…</button>
+    </form>
+    <div class="banner" id="banner" hidden></div>
+  </header>
+
+  <section>
+    <div class="sec-head">
+      <h2>Where each corp stands</h2>
+      <span class="mini" id="corpNote"></span>
+      <span class="sec-toggles">
+        <span class="mini">Open on every card:</span>
+        <label class="switch" for="showTechs"><input type="checkbox" id="showTechs"> Techs</label>
+        <label class="switch" for="showUnlocked"><input type="checkbox" id="showUnlocked"> Unlocked cards</label>
+      </span>
+    </div>
+    <div class="corps" id="corps"></div>
+  </section>
+
+  <section class="rtable" id="rtable">
+    <div class="sec-head">
+      <h2>Research table</h2>
+      <span class="mini" id="rtStatus"></span>
+    </div>
+    <p class="banner" id="rtError" hidden></p>
+    <div class="rt-grid">
+      <div id="rtNow"></div>
+      <div id="rtSuggest"></div>
+    </div>
+    <ol class="rt-seats" id="rtSeats"></ol>
+    <form class="rt-settings" id="rtSettings">
+      <label class="switch" for="rtAuto"><input type="checkbox" id="rtAuto"> Skip automatically</label>
+      <label for="rtMode">Time limit
+        <select id="rtMode">
+          <option value="fixed">Fixed</option>
+          <option value="suggested">Follow the suggestion</option>
+        </select>
+      </label>
+      <label for="rtLimit">Seconds per turn <input type="number" id="rtLimit" min="10" step="5"></label>
+      <label for="rtCards">Cards per turn <input type="number" id="rtCards" min="1" step="1"></label>
+      <label for="rtReserve">Reserve at the end <input type="number" id="rtReserve" min="0" step="15"> s</label>
+    </form>
+  </section>
+
+  <section class="handouts" id="handouts">
+    <div class="sec-head">
+      <h2>Hand-outs</h2>
+      <span class="mini" id="handoutCount"></span>
+      <label class="switch" for="autoHand"><input type="checkbox" id="autoHand"> Hand out automatically</label>
+    </div>
+    <p class="hint" id="handoutNote"></p>
+    <p class="banner" id="handoutError" hidden></p>
+    <ol class="holist" id="handoutList"><li class="empty">Checking what is owed…</li></ol>
+    <details id="handoutDone" hidden>
+      <summary id="handoutDoneCount">Done</summary>
+      <ol class="holist" id="handoutDoneList"></ol>
+    </details>
+  </section>
+
+  <section>
+    <details class="changes" id="changesBox" open>
+      <summary><h2>Changes</h2><span class="mini" id="changeCount"></span></summary>
+      <ol class="log" id="log"></ol>
+      <button type="button" class="btn quiet" id="clearLog">Clear the log</button>
+    </details>
+  </section>
+
+  <nav class="treenav" aria-label="Highlight and jump">
+    <div class="row" id="focusRow"></div>
+    <div class="row" id="treeLinks"></div>
+  </nav>
+  <div class="legend" id="legend"></div>
+  <div id="trees" class="trees"></div>
+</div>
+
+<aside class="insp empty" id="insp" aria-live="polite">
+  <button class="btn quiet close" id="closeInsp" type="button">Close</button>
+  <div id="inspBody"></div>
+</aside>
+</div>
+<script src="sample-data.js"></script>
+<script src="demo-stub.js"></script>
+<dialog class="composer" id="composer" aria-label="Research builder"></dialog>
+<dialog class="composer" id="giver" aria-label="Give a tech"></dialog>
+<script src="../../composer.js"></script>
+<script src="../../give.js"></script>
+<script src="../../handouts.js"></script>
+<script src="../../table.js"></script>
+<script src="../../tree.js"></script>
+<script src="demo-views.js"></script>
+</body>
+</html>

@@ -1351,6 +1351,9 @@
   });
   setInterval(() => { renderStatus(); table.tick(); }, 1000);
 
+  // Only the screenshot demo (docs/demo) sets RH_DEMO; it uses this to set up each view.
+  if (window.RH_DEMO) window.RH_DEMO.api = { state, table, handouts, composer, giver, select, setFocus, renderCorps };
+
   loadGameMemory();
   refresh();
 })();

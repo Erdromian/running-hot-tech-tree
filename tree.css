@@ -18,6 +18,8 @@
   }
 }
 *{box-sizing:border-box}
+/* Layout rules (display:grid/flex) would otherwise override the hidden attribute. */
+[hidden]{display:none!important}
 html{scroll-padding-top:110px}
 body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);font-size:14px;line-height:1.5;padding-inline:20px;padding-block:24px 80px}
 .wrap{max-width:1600px;margin:0 auto;display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:28px;align-items:start}
@@ -361,12 +363,13 @@ dialog.composer::backdrop{background:rgba(10,15,20,.55)}
 /* hiding corp card sections */
 .sec-toggles{display:inline-flex;gap:14px;margin-left:auto;font-size:12.5px}
 .sec-toggles{align-items:center}
-details.sect>summary{cursor:pointer;list-style:none;display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 8px}
+details.sect>summary{cursor:pointer;list-style:none;display:block}
+details.sect>summary .sect-hint{margin-left:6px}
 details.sect>summary::-webkit-details-marker{display:none}
-details.sect>summary::before{content:"▸";color:var(--faint);font-size:11px;width:10px}
+details.sect>summary::before{content:"▸";display:inline-block;color:var(--muted);font-size:11px;width:14px}
 details.sect[open]>summary::before{content:"▾"}
 details.sect>summary:hover .mini,details.sect>summary:focus-visible .mini{color:var(--ink)}
 details.sect>summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:2px}
 details.sect[open]>summary{margin-bottom:6px}
 details.sect:not([open]) .sect-hint{display:none}
-.techs-summary{display:inline-flex;flex-wrap:wrap;gap:4px 6px}
+.techs-summary{display:inline}

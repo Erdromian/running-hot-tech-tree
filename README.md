@@ -1,152 +1,228 @@
 # Running Hot Tech Tree
 
-A Chrome extension that shows a live research tech tree for a Running Hot game. It reads the Control research page with your existing sign-in, so you don't need to copy any passwords or cookies.
+A Chrome extension for running the research side of a **Running Hot** megagame from Control. It reads the game's Control pages with your existing sign-in, draws every research tree live, and gives you one place to run research during play:
 
-## Install (once)
+- see where each corp stands
+- hand out unlocked cards
+- time the research table
+- create techs and cards
+- give, place, charge, refund and destroy
+
+![The tool: header, controls and corp cards](docs/screenshots/overview.png)
+
+*Screenshots use a made-up sample game (see [Development](#development)).*
+
+**Contents:** [Quick start](#quick-start) · [Research trees](#research-trees) · [Corp cards](#corp-cards) · [Hand-outs](#hand-outs) · [Research table](#research-table) · [Research builder](#research-builder) · [Giving a tech](#giving-a-tech) · [The rules it assumes](#the-rules-it-assumes) · [What it changes, and how safely](#what-it-changes-and-how-safely) · [How it works](#how-it-works) · [Development](#development) · [If something goes wrong](#if-something-goes-wrong)
+
+## Quick start
+
+**Install (once)**
 
 1. Open `chrome://extensions` (in Edge it's `edge://extensions`; Brave and Arc work the same way).
 2. Turn on **Developer mode** (top right).
 3. Click **Load unpacked** and choose this folder.
 4. Optional: pin the extension from the puzzle-piece menu so its icon stays on the toolbar.
 
-Keep this folder where it is. Chrome loads the extension from this folder, so moving or deleting it breaks the extension.
+Keep this folder where it is. Chrome loads the extension from it, so moving or deleting the folder breaks the extension. After pulling changes, click the reload arrow on the extension in `chrome://extensions`, then refresh the tree tab.
 
-## Use
+**Use**
 
-1. Sign in to the game site in the same browser as usual (Continue with Discord).
-2. Click the extension icon. The tree opens in a tab and refreshes on its own. The default is every 10 seconds; you can change it to 5 s, 30 s or 1 minute.
-3. To follow a different game, paste its Control link (for example `https://running-hot.megagameadmin.co.uk/control/games/2`) into **Game** and press **Refresh now**.
+1. Sign in to the game site in the same browser as usual (Continue with Discord), as Control.
+2. Click the extension icon. The tree opens in a tab and refreshes on its own: every 10 seconds by default, or 5 s, 30 s or 1 minute. It checks every 2 seconds while a research sitting is open.
+3. It follows game 2 by default. To follow a different game, paste its Control link (for example `https://running-hot.megagameadmin.co.uk/control/games/3`) into **Game** and press **Refresh now**.
 
-## What it shows
+The header shows the turn, the phase and time left in it, cards left in the public deck, and when the page last updated. The **Changes** log records research, copies, thefts, moves, Research Points, facility changes, techs added or edited in Control, skips, hand-outs and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed.
 
-- **Header:** turn, phase, time left in the phase, and cards left in the public deck.
-- **One card per corp:**
-  - every tech it holds and where it's housed, with copied, stolen and not-working cards marked
-  - its facility space: every facility with its type and used/total slots, how many slots are free, and a warning when a tech it holds isn't in a facility yet
-  - its Research Points
-  - its current hand added up by suit
-  - how many techs it has open in any tree, which are ready now, and which it could pay for but has no room for
-- **Changes:** a log of new research, copies, thefts, cards moved between facilities, Research Point changes, facilities added, lost, resized or made unavailable, techs added or edited in Control, and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed. A tech gained in the last 15 minutes gets a **New** tag on the tree.
-- **Trees:**
-  - Each tree is laid out in tiers, with its starting techs above.
-  - Dashed boxes are prerequisites that come from another tree.
-  - Coloured pips on a tech show who holds it: solid for researched, hollow for a copy, striped for not working.
-- **Highlight a corp:** shows what it holds, what it has the prerequisites for (dashed outline), and what is **Ready** now. A tech tagged **No space** is one it could pay for but has no free slot of the right facility type for.
+## Research trees
 
-## Research table
+![The Digital Tactical Control tree with DTC highlighted and a tech selected](docs/screenshots/tree.png)
 
-While Control has a research sitting open (it opens when the Action phase starts), the **Research table** section shows:
+- Every tree (each corp's and Standard) is laid out in tiers after its prerequisites, with its starting techs above. Techs with no links sit below in **Standalone techs**.
+- Dashed boxes are prerequisites that come from another tree. A red dashed **Not in the game** box is a prerequisite that matches no tech (a typo, or research that doesn't exist yet).
+- Coloured pips on a tech show who holds it: solid for researched, hollow for a copy, striped for not working. A tech gained in the last 15 minutes gets a **New** tag; one just added in Control gets **Added**.
+- **Highlight** a corp to see what it holds (filled), what it has the prerequisites for (dashed outline), and what's **Ready** now. **No space** marks a tech it could pay for but has no free slot of the right facility type for.
+- **Click any tech** to trace its whole prerequisite chain. The side panel shows its cost, effect, where it must be housed, what it needs and leads to, who holds it, and the total cost to reach it from scratch. With a corp highlighted, the panel also shows what that corp still needs, including facility space. **Edit this tech…** and **Give to a corp…** are there too.
+- A warning under a tree flags any prerequisite spelled differently from the real tech name, even by one capital letter. The site matches names exactly, so players can't research that tech until it's fixed (open it with **Edit this tech…** and save).
 
-- who is researching, how long their turn has taken, and how long they have left
-- the seats in turn order
-- a **suggested limit** per turn: time left in the phase, minus a reserve, divided by the turns left. Turns left is the cards left to play divided by cards per turn. Cards left to play is the cards still in the research decks of the corps at the table, or the cards left in the public deck, whichever is smaller. Click **Use … as the limit** to copy it into your fixed limit.
+## Corp cards
 
-Settings (remembered in the browser):
+![A corp card with a Destroy confirm, a claimed copy to place and settle, and unlocked cards to mint](docs/screenshots/corp-card.png)
 
-- **Skip automatically:** off by default. When on, anyone who goes over the limit is skipped, and it's logged in **Changes**. The skip names that corp. It takes them out of the sitting and sits them straight back down, which moves the turn on only if it is still theirs, and they keep their seat. So if they finish just before the deadline, the next researcher isn't skipped by mistake, which Control's **Pass the turn on** button can do. The game log shows each skip as a take-out and sit-down.
-- **Time limit:** **Fixed** uses *Seconds per turn*. **Follow the suggestion** uses the suggested limit as it changes.
-- **Cards per turn** and **Reserve at the end** tune the suggestion.
-- **Skip now** passes the turn on by hand.
+Each corp card shows:
 
-The site shows whose turn it is but not when it started, so the tool times each turn from when it first sees it. While a sitting is open it checks every 2 seconds, so timings are accurate to about 2 seconds. If the tab was closed when a turn began, that turn is timed from when the tab reopened.
+- **Techs**: every tech it holds and where it's housed, with copies, stolen and not-working cards marked. The small red **✕** at the end of a row destroys that tech (see below).
+- **Facility space**: every facility with its type and used/total slots, how many are free, and a warning when a tech isn't in a facility yet.
+- **Research Points**, with **Charge or add points**.
+- **Unlocked cards**: the protection and equipment cards its working techs have unlocked, with how many it holds, **Mint another** and **Refund one**.
+- **Hand**: its current research hand added up by suit, and cards left in its deck.
+- **Options**: how many techs it has open in any tree, which are ready now, and which it could pay for but has no room for.
 
-## Tidying the corp cards
+The **Techs** and **Unlocked cards** sections open and close per card (click the heading). A closed Techs section still shows its count and anything that needs you. The **Open on every card** switches in the section heading set the default. The cards don't redraw while you're typing in one.
 
-Each corp card's **Techs** and **Unlocked cards** sections open and close independently: click the section's heading. A closed Techs section still shows its count and anything that needs you (techs that need a facility, copies not paid for). The **Open on every card** switches in the section heading set whether those sections start open, and are remembered in the browser. Flipping one resets any cards you've opened or closed individually.
+**Placing a tech.** A tech not in a facility shows **Needs a facility** with a **Place in…** dropdown. It lists the same facilities the Research page's *Move to…* does: available, with a free slot, and of the tech's required type.
+
+**Claimed copies.** A copy a corp got by trade or theft arrives **Claimed**. It takes a slot straight away, but doesn't work, count as a prerequisite or trigger hand-outs until its research player pays for it: the research cost minus the copy's discount (25% weak, 50% good or stolen, 0% shared). When that went wrong, settle it here:
+
+- **Charge … and mark paid**: takes the discounted cost (rounded up) off their Research Points and turns it into a working copy.
+- **Mark paid, no charge**: turns it into a working copy for free.
+
+The site has no "mark as paid", so the tool swaps in a Researched copy. It adds the new copy first, then destroys the claimed one, then moves the new copy into the same facility, so the corp never loses the tech part-way.
+
+**Charging or adding points.** Enter an amount in any suits and an optional reason (it goes in the game log), then **Charge** or **Add**. Charging is blocked if they can't afford it.
+
+**Destroying a tech.** The red **✕** opens a confirm with **Refund what they paid** ticked. The refund gives back exactly what the site recorded them paying for that copy. Copies Control handed over for free show they paid nothing.
+
+**Minting and refunding unlocked cards.**
+
+- **Mint another** gives one more copy of an unlocked card: into the corp's hand for protection cards, or to its Security player (else CEO) for equipment. It costs half the unlocking tech's research cost, rounded up per suit.
+- **Refund one** takes one back and refunds the same half price. It uses a copy in hand if there is one; otherwise it uninstalls the most recently installed copy, and the confirm names the facility.
+- Cards with more than one version (a Physical and a Cyber Doppleganger, say) mint and refund one of **each** version for the one price.
 
 ## Hand-outs
 
-When a corp gains a tech whose effect says **Unlock: …**, the **Hand-outs** section lists what that corp is owed and hands it out:
+![The hand-outs queue and the change log](docs/screenshots/handouts.png)
 
-- **Protection cards** (Keresh, Beat Cop, Cerberus…): one copy into the corp's hand.
-- **Equipment** (Amdumbla, Data card, Honey pot…): one copy to the corp's Security player, or its CEO if it has no Security player.
+When a corp gains a tech whose effect says **Unlock: …**, the Hand-outs list shows what it's owed, oldest first:
+
+- **Protection cards**: one copy of each version into the corp's hand.
+- **Equipment**: one copy to the corp's Security player, or its CEO.
 - **Facility types** (Power, Arms, ID…): skipped. There's nothing to hand out for them on the site.
 
-**Hand out automatically** is on by default. Research the tool sees happen is handed out within one refresh and logged in **Changes**. Anything already owed when the tool first opened a game is marked **Owed from before**. It's never given automatically; click **Give**, or **Mark done** if you've dealt with it another way.
+**Hand out automatically** is on by default. Research the tool sees happen is handed out within one refresh and logged. Anything already owed when the tool first opened a game shows **Owed from before**; click **Give**, or **Mark done** if you've dealt with it another way. Each new item shows when the tool first saw it.
 
-**Cards with several versions** (two protection cards with the same name, like Doppleganger PX011 and PX012) are owed one of *each* version. Each version is listed, checked and given separately, and **Mint another** gives one of each version for the one price.
+**It never gives twice.** An item counts as done once the corp has been seen holding the card (in hand or installed), the tool has given it, or you've marked it done. That's remembered even after the card is used up and returned to Control, and each item is recorded before it's sent. After giving, the tool re-reads the site to confirm the card arrived. If the site refuses, the item shows **Failed** with **Retry**, and automatic hand-outs switch off until you turn them back on.
 
-**It never gives twice.** An item counts as done once the corp has been seen holding the card (in hand or installed), the tool has given it, or you've marked it done. That's remembered in the browser even after the card is used up and returned to Control. Each item is recorded before it's sent, so a slow site can't cause a second copy.
+## Research table
 
-After giving, the tool re-reads the site to confirm the card arrived. If the site refuses (for example, an expired sign-in), the item shows **Failed** with a **Retry** button, and automatic hand-outs switch off until you turn them back on.
+![The research table timing Digital Tactical Control's turn](docs/screenshots/table.png)
 
-This needs the extension's *cookies* permission, so it can send the site's security token with each change the way the site's own buttons do.
+While Control has a research sitting open (it opens when the Action phase starts), this shows:
 
-## The rules it assumes
+- **The current turn:** who's researching, how long their turn has taken, and how long they have left.
+- **Seats:** everyone in turn order.
+- **A suggested limit per turn:** time left in the phase, minus a reserve, divided by the turns left. Turns left is the cards left to play divided by cards per turn. Cards left to play is whichever is smaller: the cards in the playing corps' research decks, or the cards left in the public deck. It never suggests less than 15 seconds, and says so when it has to round up to that.
 
-- **Ready now** means three things: the corp holds every prerequisite, its Research Points cover the cost, and it has a free facility slot for the new tech.
-- **Prerequisites:** any working copy counts, however the corp got it: researched, copied or stolen. So a corp can research into another corp's tree once it has stolen or copied the prerequisites, and those options show a dashed outline on its card.
-- **Facility space:** every tech takes one slot. A tech with a *Housed in* type needs a free slot in a facility of that type; any other tech can go in any facility. A tech the corp holds that isn't in a facility yet counts against its free slots.
-- **Affordability** uses Research Points only, not cards still in the hand.
+Settings, remembered in the browser:
 
-## Placing techs
+- **Skip automatically** (off by default) skips anyone who goes over the limit.
+  - **It skips a named corp.** It takes them out of the sitting and sits them straight back down, which only moves the turn on if it's still theirs, and they keep their seat. So if they finish just before the deadline, the next researcher isn't skipped by mistake, as Control's **Pass the turn on** button can do.
+  - **Checked first:** it re-reads the site right before skipping.
+- **Time limit:** **Fixed** (seconds per turn) or **Follow the suggestion**.
+- **Cards per turn** and **Reserve at the end** tune the suggestion.
+- **Skip now** skips by hand.
 
-A tech a corp holds but hasn't put in a facility shows **Needs a facility** on its corp card, with a **Place in…** dropdown and a **Place** button. The dropdown lists the same facilities the Research page's *Move to…* does: available, with a free slot, and of the tech's required type. After placing, the tool re-reads the site to check it moved and logs it.
-
-**Claimed** techs are copies a corp got by trade or theft and hasn't paid for yet. They take up a slot straight away, but don't work (and don't count as prerequisites or trigger hand-outs) until the corp's research player pays for them, at the research cost minus the copy's discount. Placing one doesn't change that.
-
-## Giving a tech
-
-**Give a tech…** in the header (or **Give to a corp…** in the side panel) hands a corp a technology card in one step:
-
-- Search for the tech, pick the corp, and it goes into the facility with the most room that can take it: a free slot, of the tech's required type. You can pick another facility, or none.
-- **How they got it** defaults to **Researched**, which arrives working. The copy options (shared, weak, good, stolen) arrive **Claimed** and still have to be paid for.
-- **Charge them the research cost** (Researched only) also takes the full cost off the corp's Research Points, one adjustment per suit with a reason in the game log. It won't send if they can't afford it.
-- It warns if the corp already holds that tech. After giving, it re-reads the site to confirm the tech and the charge.
-
-## Minting extra unlocked cards
-
-Each corp card lists the **Unlocked cards** its working techs have unlocked (protection cards and equipment), with how many copies the corp holds. **Mint another** gives one more copy, into the corp's hand for protection cards or to its Security player (else CEO) for equipment. It charges half the unlocking tech's research cost, rounded up in each suit; if two techs unlock the same card, the cheaper one sets the price. The button shows the price and needs a second click to confirm. It checks the corp's current points first and won't mint if they can't afford it. After minting, it re-reads the site to confirm the new copy and logs it. Minting is deliberate, so the hand-outs' "never give twice" rule doesn't block it.
-
-**Refund one** undoes a mint. It takes back one copy of each version and refunds the same half price, with a reason in the game log. It takes a copy from the corp's hand if there is one. Otherwise it uninstalls the most recently installed copy (the confirm button names the facility) and takes that. Equipment comes from its Security player, or whoever on the corp holds one. It needs a copy of every version to take back, because a mint gave one of each. Hand-outs won't re-give a card after it's taken back.
-
-## Charging or adding Research Points
-
-Each corp card's Research Points section has **Charge or add points**. Enter an amount in any suits and an optional reason (it goes in the game log), then click **Charge** to take the points off, or **Add** to give them. Each needs a second click to confirm. **Charge** is blocked if the corp doesn't have enough. It makes the same per-suit adjustment as the game panel's point buttons, then re-reads the site and shows the new totals. What you've typed is kept while the page refreshes, and the cards don't redraw while you're typing in them.
-
-## Destroying a tech
-
-Every tech on a corp card has **Destroy…**. It asks you to confirm, with **Refund what they paid** ticked by default. The refund gives back exactly what the site recorded them paying for that copy; techs Control handed over for free show they paid nothing. It does the same as the Research page's Destroy (the tech is marked Destroyed and its slot freed), then refunds per suit with a reason in the game log.
-
-## Settling claimed copies
-
-Each **Claimed** tech on a corp card has two buttons, each needing a second click to confirm:
-
-- **Charge … and mark paid:** takes the research cost minus the copy's discount (rounded up) off their Research Points, and turns it into a working copy.
-- **Mark paid, no charge:** turns it into a working copy for free.
-
-The site has no "mark as paid", so the tool swaps the claimed copy for a Researched one: it adds the new copy first, then destroys the claimed one, then moves the new copy into the same facility. That way the corp never loses the tech part-way. If something fails, the message says exactly which steps were done.
+The site shows whose turn it is but not when it started, so the tool times each turn from when it first sees it, to within about 2 seconds.
 
 ## Research builder
 
-**New research…** in the header (or **Edit this tech…** in the side panel) opens a form for adding techs to Control, instead of the site's own form:
+![Making a new tech with autocompleted prerequisites and a new Physical and Cyber defence card](docs/screenshots/builder.png)
 
-- **Prerequisites** are picked from the game's real techs as you type. The matches show each tech's tree and code, and ↑/↓ then Enter adds one. Pick as many as you like; Backspace removes the last. The tool joins them with semicolons, so spelling and formatting are always right. To name a tech that doesn't exist yet, pick **Use "…"**; it shows as a red dashed chip. Pasting a semicolon list from the old form turns it into chips.
-- **Tree** follows the prerequisites. If they come from one corp's tree, the new tech goes in that tree, with a note saying why. If they come from two corps' trees, it asks you to pick. Standard prerequisites don't change it.
-- **Checks:** a name or card code that's already taken blocks saving. The preview shows the tier and tree it will land in, prerequisites from other trees, names not in the game yet, and a warning if no cost makes it a starting tech. **Use RGR105** fills in the next free card code for that tree.
+**New research…** in the header (or **Edit this tech…** in the side panel) replaces the site's tech form:
+
+- **Prerequisites** are picked from the game's real techs as you type, showing each one's tree and code. Use ↑/↓ and Enter, and pick as many as you like; Backspace removes the last. Names are always spelled exactly and joined with semicolons. To name a tech that doesn't exist yet, pick **Use "…"** (it shows as a red dashed chip). Pasting a semicolon list turns it into chips.
+- **Tree** follows the prerequisites. If they come from one corp's tree, the new tech goes in that tree, with a note saying why. If they come from two corps' trees, it asks you to pick.
+- **Checks:**
+  - A name or card code that's already taken blocks saving.
+  - The preview shows the tier and tree the tech lands in, prerequisites from other trees, names not in the game yet, and a warning if leaving every cost blank makes it a starting tech.
+  - Every **Unlock:** name in the effect is checked against the game's cards, equipment, techs and facility types.
+  - **Use RGR105** fills in the next free card code.
 - **Cost:** leave every suit blank for a starting tech. Once any suit has a price, blank suits count as 0.
-- Nothing is sent until you confirm. Afterwards the tool re-reads the Cards page and tells you whether everything was saved.
+- **Also create a new card for it to unlock:** make the card in the same form.
+  - A **defence card** can have a Physical version, a Cyber version or both, each with its own challenge, consequence, charge and code.
+  - An **equipment card** needs a type and an effect.
+  - The card is created first, and the tech's effect gets "Unlock: card name", so hand-outs and minting pick it up.
+- Nothing is sent until you confirm. Afterwards the tool re-reads the Cards page and reports anything that didn't save. **Editing** uses a route the site's own page doesn't offer, and changes every field.
 
-**New cards to unlock:** tick **Also create a new card for it to unlock** and choose the kind:
+Techs added on the Control **Cards** page appear on the next refresh too, in the tree you picked. The change log records techs added, renamed, moved or given new prerequisites.
 
-- **Defence card:** a name (it defaults to the tech's name), an availability (Research only by default), then a **Physical** version, a **Cyber** version, or both, each with its own challenge, consequence, charge and code.
-- **Equipment card:** a name, a type (Permanent, This run or Single use), the card's effect, and an optional cost and code.
+## Giving a tech
 
-The card is created first, and the tech's effect gets "Unlock: card name" added, so hand-outs and minting give it out: defence cards (every version) to the corp's hand, equipment to its Security player. The preview also checks every "Unlock:" name in the effect against the game's cards, equipment, techs and facility types, and warns when one is misspelled or missing.
+![Giving a tech to a corp, dropped into the facility with the most room, and charging them for it](docs/screenshots/give.png)
 
-**Editing** uses a route the site has but its own page doesn't offer. It was tested on the test game and changes every field, including name, tree, prerequisites and costs. After saving, the tool still re-reads the tech and reports anything that didn't take.
+**Give a tech…** in the header (or **Give to a corp…** in the side panel):
 
-## Custom research
+- **Pick:** search for the tech and pick the corp.
+- **Where it goes:** into the facility with the most room that can take it (a free slot, of the right type). You can choose another facility, or none.
+- **How they got it:** defaults to **Researched**, which works straight away. The copy options arrive **Claimed** and still need paying for.
+- **Charge them the research cost** (Researched only): takes the full cost off their Research Points. It won't send if they can't afford it.
+- **Checks:** it warns if they already hold the tech, and confirms the tech and the charge on the site afterwards.
 
-Techs added on the Control **Cards** page appear on the next refresh, in the tree you picked, placed after their prerequisites. The change log records them as "New technology" and they get an **Added** tag for 15 minutes.
+## The rules it assumes
 
-- **Prerequisites:** names are matched loosely, so differences in capitalisation, spacing, or straight vs curly apostrophes don't matter.
-- **A prerequisite that doesn't match any tech** (a typo, or research that doesn't exist yet) shows as a red dashed **Not in the game** box, with a warning under that tree. No one can research that tech until a tech with that name exists.
-- **Zero cost:** a custom tech with a cost of 0 is still researchable and appears in the tree. Only cards another tech unlocks (like Honey pot) and deck-customisation rules go in the "not researched directly" note.
-- **Click any tech:** highlights its whole prerequisite chain. The side panel shows its cost, effect, where it must be housed, and the total cost to reach it. If a corp is highlighted, the panel also shows what that corp still needs.
+- **Ready now** means the corp holds every prerequisite, its Research Points cover the cost, and it has a free facility slot for the new tech.
+- **Prerequisites:** any working copy counts, however the corp got it (researched, copied or stolen). So a corp can research into another corp's tree once it has the prerequisites.
+- **Facility space:**
+  - Every tech takes a slot, including unpaid claimed copies.
+  - A tech with a *Housed in* type needs a slot of that type.
+  - Each Corporate facility adds 2 slots to every facility the corp owns.
+- **Affordability** uses Research Points only, not cards still in the hand.
+- **Cards with several versions** under one name (Physical and Cyber) are owed, minted and refunded as every version.
+- **Discounted prices** round up in each suit.
+
+## What it changes, and how safely
+
+The tool only changes the game when you click something, or through automatic hand-outs and auto-skip, which you can switch off. Every change:
+
+- **uses the same request** the site's own Control buttons make
+- **sends the site's security token** with it, which is why the extension needs the *cookies* permission
+- **is re-read afterwards** to confirm it landed. If it didn't, you get a message saying what did and didn't happen.
+
+Other safeguards:
+
+- **Confirmation:** anything that costs or refunds points, destroys, creates or edits needs a confirm step.
+- **Order of steps:** multi-step actions go in the order that can't lose anything. For example, settling a claimed copy adds the new copy before destroying the old one.
+- **Where it connects:** the extension can only reach `*.megagameadmin.co.uk`. Nothing is sent anywhere else, and settings and the change log stay in your browser.
+
+## How it works
+
+The site is a Laravel/Inertia app: every Control page also serves its data as JSON. The tool reads three pages:
+
+| Page | What it uses |
+|---|---|
+| `/control/games/{id}/research` | techs and prerequisites, corps' holdings, Research Points, hands, decks, facilities, the research sitting |
+| `/control/games/{id}/facilities` | protection cards each corp holds (in hand and installed), facility types, installed cards |
+| `/control/games/{id}/cards` | the protection card and equipment catalogues, who holds which equipment, the tree list |
+
+Changes it can send, all to `/control/games/{id}/…`:
+
+| Action | Request |
+|---|---|
+| Give a protection card / set copies in hand | `POST protection-card-holdings/give` / `PATCH protection-card-holdings` |
+| Give equipment / set copies | `POST equipment-holdings/give` / `PATCH equipment-holdings` |
+| Uninstall a protection card | `DELETE facilities/{facility}/cards/{card}` |
+| Hand over, move or destroy a tech copy | `POST technology-holdings` / `PATCH` or `DELETE technology-holdings/{id}` |
+| Create or edit a tech | `POST technologies` / `PATCH technologies/{id}` |
+| Create a defence or equipment card | `POST protection-cards` / `POST equipment-cards` |
+| Charge, add or refund Research Points | `POST trackers` (mode `adjust`) |
+| Skip a researcher | `POST research/session/seats/{corp}` (take out, then sit back down) |
+
+| File | What it does |
+|---|---|
+| `manifest.json`, `background.js` | the extension; the toolbar icon opens or focuses the tree tab |
+| `tree.html`, `tree.css` | the page and its styles |
+| `tree.js` | fetching and model, trees, corp cards, placing, settling, charging, destroying, change log |
+| `handouts.js` | hand-outs, minting and refunding unlocked cards |
+| `table.js` | the research table timer, suggestion and skipping |
+| `composer.js` | the research builder |
+| `give.js` | Give a tech |
+
+## Development
+
+**Test on the test game only.** Anything that changes data should be tried on game 3 (the Control Test Game), never on a live game. Clean up afterwards: delete test techs and cards, set points and card counts back, and close any sitting you opened.
+
+**Demo and screenshots.** `docs/demo/demo.html` runs the real page against a made-up sample game (`sample-data.js`), with a stand-in for the site (`demo-stub.js`) so nothing reaches the real site. `demo-views.js` sets up each screenshot. To re-take them after changing the UI (needs Google Chrome and Node 22+):
+
+```bash
+node docs/demo/screenshots.mjs
+```
+
+You can also open `docs/demo/demo.html?view=builder` (or `tree`, `handouts`, `table`, `corp`, `give`) in Chrome to try the UI without signing in.
 
 ## If something goes wrong
 
 - **"Signed out"**: sign in to the game site again in this browser. The tree picks it up on the next refresh.
-- **"Could not reach the game site"**: check your connection and the game link. The extension can only read sites on `megagameadmin.co.uk`.
-- **It suddenly stops understanding the page**: the site's data format has probably changed. The logic is all in `tree.js`, in the `buildModel` function.
+- **"The extension doesn't have its cookies permission yet"**: reload the extension on `chrome://extensions`, then refresh the tab.
+- **"Could not reach the game site"**: check your connection and the game link. The extension can only reach `megagameadmin.co.uk`.
+- **A custom tech isn't researchable**: look for a spelling warning under its tree, then open it with **Edit this tech…** and save.
+- **A traded tech doesn't work**: it's **Claimed** until its research player pays for it. Settle it from the corp card if that went wrong.
+- **It stops understanding the page**: the site's data format has probably changed. The data mapping is in `tree.js` (`buildModel`) and `handouts.js` (`loadAux`).
