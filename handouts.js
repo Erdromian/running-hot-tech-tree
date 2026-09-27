@@ -12,7 +12,7 @@ window.RHHandouts = function createHandouts(deps) {
   const AUTO_MAX_PER_CYCLE = 5;
   const AUX_MAX_AGE = 60 * 1000;
   const DONE = new Set(['held', 'seen', 'given', 'manual']);
-  const st = { key: null, aux: null, auxAt: 0, claimSig: '', items: [], ledger: {}, baseline: null, auto: true, busy: false, error: null };
+  const st = { key: null, aux: null, auxAt: 0, claimSig: '', items: [], ledger: {}, baseline: null, auto: true, busy: false, error: null, seen: {} };
   const $ = id => document.getElementById(id);
 
   function load() {
@@ -22,6 +22,7 @@ window.RHHandouts = function createHandouts(deps) {
     st.ledger = store.get(k + ':handout-ledger', {});
     st.baseline = store.get(k + ':handout-baseline', null);
     st.auto = store.get(k + ':handout-auto', true);
+    st.seen = store.get(k + ':handout-seen', {});
     st.aux = null; st.auxAt = 0; st.claimSig = ''; st.items = []; st.error = null;
   }
   const saveLedger = () => store.set(st.key + ':handout-ledger', st.ledger);
@@ -49,6 +50,7 @@ window.RHHandouts = function createHandouts(deps) {
         const o = out.get(k);
         o.techs.add(t.name);
         o.holdingIds.push(h.id);
+        o.first = Math.min(o.first ?? Infinity, h.id);
       });
     }));
     return [...out.values()];
@@ -60,22 +62,31 @@ window.RHHandouts = function createHandouts(deps) {
     st.aux = {
       F: F.props,
       C: C.props,
-      pcByKey: new Map((C.props.protectionCards || []).map(c => [keyOf(c.name), c])),
-      eqByKey: new Map((C.props.equipment || []).map(c => [keyOf(c.name), c])),
+      // Grouped by name: a game can have two cards with the same name (e.g. two Dopplegangers).
+      pcByKey: groupByName(C.props.protectionCards || []),
+      eqByKey: groupByName(C.props.equipment || []),
       ftKeys: new Set((F.props.facilityTypes || []).map(f => keyOf(f.name))),
     };
     st.auxAt = Date.now();
   }
 
-  const protectionCount = (corpId, cardId) => {
+  function groupByName(list) {
+    const g = new Map();
+    list.forEach(c => { const k = keyOf(c.name); if (!g.has(k)) g.set(k, []); g.get(k).push(c); });
+    return g;
+  }
+  const idsOf = card => (card && card.sameIds) || (card ? [card.id] : []);
+  // Copies held, counting every card that shares the name.
+  const protectionCount = (corpId, card) => {
     const e = (st.aux.F.cardHoldings || []).find(h => h.corporation_id === corpId);
-    const c = e && (e.cards || []).find(x => x.card_type_id === cardId);
-    return c ? (c.copies_in_hand || 0) + (c.installed || 0) : 0;
+    const ids = idsOf(card);
+    return ((e && e.cards) || []).filter(x => ids.includes(x.card_type_id)).reduce((a, x) => a + (x.copies_in_hand || 0) + (x.installed || 0), 0);
   };
   const corpMembers = corpId => {
     const g = (st.aux.C.equipmentHoldings || []).find(x => x.key === 'corporation:' + corpId);
     return g ? g.members || [] : [];
   };
+  const equipmentCount = (corpId, card) => { const ids = idsOf(card); return corpMembers(corpId).reduce((a, mb) => a + (mb.cards || []).filter(x => ids.includes(x.card_type_id)).reduce((b, x) => b + (x.copies || 1), 0), 0); };
   const recipientFor = corpId => {
     const ms = corpMembers(corpId);
     return ms.find(x => x.role === 'security') || ms.find(x => x.role === 'ceo') || null;
@@ -87,39 +98,56 @@ window.RHHandouts = function createHandouts(deps) {
     for (const cl of claims(m)) {
       const k = keyOf(cl.name);
       if (st.aux.ftKeys.has(k)) continue;
-      const pc = st.aux.pcByKey.get(k), eq = pc ? null : st.aux.eqByKey.get(k);
-      const kind = pc ? 'protection' : eq ? 'equipment' : 'other';
-      const card = pc || eq || null;
-      const it = {
-        id: `${cl.corp.id}|${card ? `${kind}:${card.id}` : `other:${k}`}`,
-        corp: cl.corp, kind, card, name: card ? card.name : cl.name,
-        techs: [...cl.techs],
-        isNew: cl.holdingIds.some(h => !baseline.has(h)),
-      };
-      let held = false;
-      if (kind === 'protection') held = protectionCount(cl.corp.id, card.id) > 0;
-      if (kind === 'equipment') {
-        it.recipient = recipientFor(cl.corp.id);
-        // Honey pot and Honey bomb also exist as technology cards; holding either form counts.
-        const sameTech = m.techs.find(t => keyOf(t.name) === k);
-        held = corpMembers(cl.corp.id).some(mb => (mb.cards || []).some(x => x.card_type_id === card.id))
-          || !!(sameTech && m.usableBy.get(cl.corp.id).has(sameTech.name));
+      const pcs = st.aux.pcByKey.get(k), eqs = pcs ? null : st.aux.eqByKey.get(k);
+      const kind = pcs ? 'protection' : eqs ? 'equipment' : 'other';
+      const isNew = cl.holdingIds.some(h => !baseline.has(h));
+      // Some cards come in more than one version under the same name (e.g. Doppleganger PX011 and PX012).
+      // The corp is owed every version, so each one is its own item, checked and given separately.
+      const versions = pcs || eqs || [null];
+      // Versions usually differ by kind (Physical and Cyber); label them by that, else by card code.
+      const byKind = versions.length > 1 && new Set(versions.map(v => v && v.kind_label)).size === versions.length;
+      const versionLabel = card => (byKind ? card.kind_label : card.code || `#${card.id}`);
+      for (const card of versions) {
+        const it = {
+          id: `${cl.corp.id}|${card ? `${kind}:${card.id}` : `other:${k}`}`,
+          corp: cl.corp, kind, card,
+          name: card ? card.name + (versions.length > 1 ? ` (${versionLabel(card)})` : '') : cl.name,
+          version: card && versions.length > 1 ? versionLabel(card) : null,
+          techs: [...cl.techs],
+          isNew,
+          // Held techs' ids go up in the order they were gained, so they order hand-outs even for
+          // research from before the tool was watching.
+          order: cl.first,
+        };
+        if (isNew && !st.seen[it.id]) st.seen[it.id] = Date.now();
+        it.seenAt = st.seen[it.id] || null;
+        let held = false;
+        if (kind === 'protection') held = protectionCount(cl.corp.id, card) > 0;
+        if (kind === 'equipment') {
+          it.recipient = recipientFor(cl.corp.id);
+          // Honey pot and Honey bomb also exist as technology cards; holding either form counts.
+          const sameTech = m.techs.find(t => keyOf(t.name) === k);
+          held = equipmentCount(cl.corp.id, card) > 0
+            || !!(sameTech && m.usableBy.get(cl.corp.id).has(sameTech.name));
+        }
+        const led = st.ledger[it.id];
+        if (held) {
+          if (!led || !DONE.has(led.state)) st.ledger[it.id] = { state: led && (led.state === 'sent' || led.state === 'failed') ? 'given' : 'seen', t: Date.now(), how: led && led.how };
+          it.status = 'held';
+        } else if (led) {
+          it.status = led.state;
+        } else if (kind === 'other' || (kind === 'equipment' && !it.recipient)) {
+          it.status = 'manual-needed';
+        } else {
+          it.status = st.auto && it.isNew ? 'auto' : 'owed';
+        }
+        it.led = st.ledger[it.id];
+        items.push(it);
       }
-      const led = st.ledger[it.id];
-      if (held) {
-        if (!led || !DONE.has(led.state)) st.ledger[it.id] = { state: led && (led.state === 'sent' || led.state === 'failed') ? 'given' : 'seen', t: Date.now(), how: led && led.how };
-        it.status = 'held';
-      } else if (led) {
-        it.status = led.state;
-      } else if (kind === 'other' || (kind === 'equipment' && !it.recipient)) {
-        it.status = 'manual-needed';
-      } else {
-        it.status = st.auto && it.isNew ? 'auto' : 'owed';
-      }
-      it.led = st.ledger[it.id];
-      items.push(it);
     }
-    return items;
+    store.set(st.key + ':handout-seen', st.seen);
+    // Oldest first: the order the research happened, then corp, then card.
+    return items.sort((a, b) => a.order - b.order || a.corp.name.localeCompare(b.corp.name) || a.name.localeCompare(b.name));
   }
 
   async function give(it, how) {
@@ -235,7 +263,7 @@ window.RHHandouts = function createHandouts(deps) {
     const techs = it.techs.map(t => `<button type="button" class="linkish" data-tech="${esc(t)}">${esc(t)}</button>`).join(', ');
     return `<li class="ho s-${it.status}" style="${cv(it.corp.color)}">
       <span class="sw"></span>
-      <div class="what"><span><b>${esc(it.name)}</b> → ${to}</span><span class="mini">${KIND[it.kind]} · unlocked by ${techs}</span></div>
+      <div class="what"><span><b>${esc(it.name)}</b> → ${to}</span><span class="mini">${KIND[it.kind]} · unlocked by ${techs}${it.seenAt ? ` · seen ${time(it.seenAt)}` : ''}</span></div>
       <div class="state">${statusHTML(it)}</div>
       <div class="acts">${actionsHTML(it)}</div>
     </li>`;
@@ -271,5 +299,133 @@ window.RHHandouts = function createHandouts(deps) {
     if (m) update(m); else render();
   }
 
-  return { update, setAuto, render, giveByHand, markDone, state: st };
+  // ---------- Minting extra copies ----------
+  // A corp can mint another copy of a card one of its working techs unlocked, for half that tech's
+  // research cost (rounded up in each suit). A card that comes in several versions mints one of each
+  // version for that one price. It's a deliberate extra copy, so the "never give twice" rule doesn't
+  // apply. The cards are given first, then the points charged, then everything is checked.
+  const MINT_SHARE = 0.5;
+  const totalOf = t => Object.values(t.cost || {}).reduce((a, b) => a + (+b || 0), 0);
+  function mintOptions(corpId) {
+    const m = getModel();
+    if (!st.aux || !m) return [];
+    const byName = new Map();
+    st.items
+      .filter(i => i.corp.id === corpId && (i.kind === 'protection' || (i.kind === 'equipment' && i.recipient)))
+      .forEach(i => {
+        const k = `${i.kind}:${keyOf(i.card.name)}`;
+        if (!byName.has(k)) byName.set(k, []);
+        byName.get(k).push(i);
+      });
+    return [...byName.entries()].map(([k, versions]) => {
+      const first = versions[0];
+      const tech = [...new Set(versions.flatMap(v => v.techs))].map(n => m.byName.get(n)).filter(Boolean).sort((a, b) => totalOf(a) - totalOf(b))[0];
+      const cost = m.suits.map(s => ({ s, n: Math.ceil(((tech && tech.cost[s.value]) || 0) * MINT_SHARE) })).filter(x => x.n > 0);
+      const count = v => (v.kind === 'protection' ? protectionCount(corpId, v.card) : equipmentCount(corpId, v.card));
+      return {
+        removable: versions.every(v => removableFrom(corpId, v) !== null),
+        id: `${corpId}|mint:${k}`, name: first.card.name, kind: first.kind,
+        versions: versions.map(v => ({ item: v, code: v.version || v.card.code || `#${v.card.id}`, held: count(v) })),
+        held: versions.reduce((a, v) => a + count(v), 0),
+        tech: tech ? tech.name : first.techs[0], cost, to: first.kind === 'equipment' ? first.recipient.name : first.corp.name,
+      };
+    });
+  }
+
+  // Where one copy of a version can be taken back from: protection cards from the corp's hand
+  // (installed ones have to be uninstalled first), equipment from its Security player or whoever holds it.
+  function removableFrom(corpId, v) {
+    if (v.kind === 'protection') {
+      const e = (st.aux.F.cardHoldings || []).find(h => h.corporation_id === corpId);
+      const c = e && (e.cards || []).find(x => x.card_type_id === v.card.id);
+      return c && c.copies_in_hand > 0 ? { inHand: c.copies_in_hand } : null;
+    }
+    const holders = corpMembers(corpId).map(mb => ({ mb, n: (mb.cards || []).filter(x => x.card_type_id === v.card.id).reduce((a, x) => a + (x.copies || 1), 0) })).filter(x => x.n > 0);
+    const pick = holders.find(x => v.recipient && x.mb.character_id === v.recipient.character_id) || holders[0];
+    return pick ? { character: pick.mb, copies: pick.n } : null;
+  }
+
+  // Undo a mint: take back one copy of each version and refund the same half price.
+  async function unmint(corpId, optionId) {
+    const m = getModel(), c = m.corpById.get(corpId);
+    await loadAux();
+    st.items = build(m);
+    const opt = mintOptions(corpId).find(o => o.id === optionId);
+    if (!opt || !c) throw new Error('that card isn’t on their list any more.');
+    const plan = opt.versions.map(v => ({ v, from: removableFrom(corpId, v.item) }));
+    const stuck = plan.filter(p => !p.from);
+    if (stuck.length) throw new Error(`no copy of ${stuck.map(p => p.v.code).join(', ')} to take back: ${opt.kind === 'protection' ? 'every copy is installed. Uninstall one on the Facility Defence page first' : 'nobody on the corp holds one'}.`);
+    const taken = [];
+    for (const { v, from } of plan) {
+      try {
+        if (v.item.kind === 'protection') await post('/protection-card-holdings', { corporation_id: corpId, protection_card_type_id: v.item.card.id, copies: from.inHand - 1 }, { method: 'PATCH' });
+        else await post('/equipment-holdings', { character_id: from.character.character_id, equipment_card_type_id: v.item.card.id, copies: from.copies - 1 }, { method: 'PATCH' });
+        taken.push(v.code);
+      } catch (e) {
+        if (!taken.length) throw e;
+        throw Object.assign(new Error(`took back ${taken.join(', ')} but not ${v.code}: ${e.message} Nothing was refunded.`), { partial: true });
+      }
+    }
+    const refunded = [];
+    try {
+      for (const x of opt.cost) {
+        await post('/trackers', { subject_type: 'corporation', subject_id: corpId, tracker: `research_${x.s.value}`, mode: 'adjust', value: x.n, reason: `Refund: took back a minted ${opt.name}` });
+        refunded.push(`${x.n} ${x.s.label}`);
+      }
+    } catch (e) {
+      throw Object.assign(new Error(`${opt.name} was taken back, but the refund stopped after ${refunded.join(', ') || 'nothing'}: ${e.message} Adjust their points by hand.`), { partial: true });
+    }
+    await loadAux();
+    st.items = build(m);
+    saveLedger();
+    const now = mintOptions(corpId).find(o => o.id === optionId);
+    const still = now ? opt.versions.filter(v => { const n = now.versions.find(x => x.item.id === v.item.id); return n && n.held >= v.held; }) : [];
+    if (still.length) throw Object.assign(new Error(`${opt.name} was refunded, but ${still.map(v => v.code).join(', ')} still shows the same count. Check ${opt.to} on the site.`), { partial: true });
+    const what = opt.versions.length > 1 ? `${opt.name} (${taken.join(' and ')})` : opt.name;
+    addLog({ kind: 'handout', corp: corpId, tech: opt.tech, text: `Took back a minted ${what} from ${opt.to}, refunded ${refunded.join(', ') || 'nothing'}` });
+    return { held: now ? now.held : 0, refunded, taken };
+  }
+
+  async function mint(corpId, optionId) {
+    const m = getModel(), c = m.corpById.get(corpId);
+    const opt = mintOptions(corpId).find(o => o.id === optionId);
+    if (!opt || !c) throw new Error('that card isn’t available to mint any more.');
+    // Check against their points right now, not the last refresh, so two quick mints can't overspend.
+    const fresh = (await fetchPage(gameBase() + '/research')).props.research.corporations.find(x => x.id === corpId);
+    const points = (fresh && fresh.points) || c.points;
+    const short = opt.cost.filter(x => (points[x.s.value] || 0) < x.n);
+    if (short.length) throw new Error(`${c.name} is short by ${short.map(x => `${x.n - (points[x.s.value] || 0)} ${x.s.label}`).join(', ')}.`);
+    const given = [];
+    for (const v of opt.versions) {
+      const it = v.item;
+      try {
+        if (it.kind === 'protection') await post('/protection-card-holdings/give', { corporation_id: corpId, protection_card_type_id: it.card.id, copies: 1 });
+        else await post('/equipment-holdings/give', { character_id: it.recipient.character_id, equipment_card_type_id: it.card.id, copies: 1 });
+        given.push(v.code);
+      } catch (e) {
+        if (!given.length) throw e;
+        throw Object.assign(new Error(`gave ${given.join(', ')} but not ${v.code}: ${e.message} Nothing was charged.`), { partial: true });
+      }
+    }
+    const charged = [];
+    try {
+      for (const x of opt.cost) {
+        await post('/trackers', { subject_type: 'corporation', subject_id: corpId, tracker: `research_${x.s.value}`, mode: 'adjust', value: -x.n, reason: `Minted another ${opt.name} (half of ${opt.tech})` });
+        charged.push(`${x.n} ${x.s.label}`);
+      }
+    } catch (e) {
+      throw Object.assign(new Error(`${opt.name} was given, but charging stopped after ${charged.join(', ') || 'nothing'}: ${e.message} Adjust their points by hand.`), { partial: true });
+    }
+    await loadAux();
+    st.items = build(m);
+    saveLedger();
+    const now = mintOptions(corpId).find(o => o.id === optionId);
+    const missing = now ? opt.versions.filter(v => { const n = now.versions.find(x => x.item.id === v.item.id); return !n || n.held <= v.held; }) : opt.versions;
+    if (missing.length) throw Object.assign(new Error(`${opt.name} was charged for, but ${missing.map(v => v.code).join(', ')} isn’t showing yet. Check ${opt.to} on the site.`), { partial: true });
+    const what = opt.versions.length > 1 ? `${opt.name} (${given.join(' and ')})` : opt.name;
+    addLog({ kind: 'handout', corp: corpId, tech: opt.tech, text: `Minted another ${what} for ${opt.to}, charged ${charged.join(', ') || 'nothing'} (half of ${opt.tech})` });
+    return { held: now.held, charged, given };
+  }
+
+  return { update, setAuto, render, giveByHand, markDone, mintOptions, mint, unmint, state: st };
 };

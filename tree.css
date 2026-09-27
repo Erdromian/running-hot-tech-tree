@@ -61,7 +61,7 @@ header.top h1{font-size:40px;line-height:1.05;font-weight:700}
 .corp .pos{font-size:12.5px;color:var(--muted)}
 .corp .pos b{color:var(--ink);font-weight:600}
 .held{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:4px}
-.held li{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr);gap:2px 8px;font-size:12.5px;align-items:baseline}
+.held li{display:grid;grid-template-columns:minmax(0,auto) minmax(0,1fr) auto;gap:2px 8px;font-size:12.5px;align-items:baseline}
 .held .n{font-weight:500}
 .held .f{color:var(--muted);text-align:right}
 .held .off .f{color:var(--warn);font-weight:500}
@@ -321,3 +321,39 @@ dialog.composer::backdrop{background:rgba(10,15,20,.55)}
 .place-msg{font-size:12px;flex-basis:100%}
 .place-msg.ok{color:var(--ok)}
 .place-msg.bad{color:var(--warn)}
+
+.insp-acts{display:flex;flex-wrap:wrap;gap:6px}
+#giver .rc-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+#gvTech[hidden]{display:none}
+.held .place.pay .btn{font-size:12px}
+
+/* charging or adding research points */
+.rp-adjust{font-size:12.5px}
+.rp-adjust summary{cursor:pointer;color:var(--muted);font-size:12px;width:max-content}
+.rp-adjust[open]{display:flex;flex-direction:column;gap:6px}
+.rp-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px;margin-top:6px}
+.rp-grid label,.rp-reason{display:flex;flex-direction:column;gap:2px;font-size:11.5px;color:var(--muted)}
+.rp-adjust input{font:inherit;font-size:13px;color:var(--ink);background:var(--panel);border:1px solid var(--rule);border-radius:4px;padding:3px 6px;min-width:0}
+.rp-grid input{font-family:var(--mono)}
+.rp-acts{display:flex;flex-wrap:wrap;gap:6px}
+.rp-acts .btn{font-size:12.5px;padding:3px 10px}
+
+.held.mint .place{padding:2px 0 4px}
+.held.mint .btn{font-size:12px;padding:3px 10px}
+
+/* new defence card in the research builder */
+.rc-card{gap:8px}
+.rc-cardform{display:flex;flex-direction:column;gap:10px;border-left:3px solid var(--rule);padding-left:12px}
+.rc-cardform[hidden]{display:none}
+.rc-versions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.rc-ver{border:1px solid var(--rule);border-radius:6px;padding:8px 10px 10px;margin:0;display:flex;flex-direction:column;gap:8px;min-width:0}
+.rc-ver legend{padding:0 4px}
+@media (max-width:560px){.rc-versions{grid-template-columns:minmax(0,1fr)}}
+
+/* destroying a held tech */
+.held .destroy-link{grid-column:3;grid-row:1;font:inherit;font-size:11px;font-weight:700;line-height:1;background:none;border:1px solid transparent;border-radius:3px;color:var(--warn);opacity:.75;padding:2px 4px;cursor:pointer}
+.held .destroy-link:hover,.held .destroy-link:focus-visible{opacity:1;background:var(--warn);color:var(--panel);outline:none}
+.held .place.destroy{border-left:3px solid var(--warn);padding-left:8px}
+.destroy-q{flex-basis:100%;font-size:12.5px;font-weight:500}
+.btn.danger{border-color:var(--warn);color:var(--warn)}
+.btn.danger:hover,.btn.danger:focus-visible{background:var(--warn);color:var(--panel)}

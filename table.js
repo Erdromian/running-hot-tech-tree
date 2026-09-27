@@ -20,6 +20,21 @@ window.RHTable = function createTable(deps) {
   const save = () => store.set('rh.table.settings', st.settings);
 
   const session = m => (m && m.r && m.r.session) || null;
+
+  // Skip one named corp, never "whoever is up now". The site's Pass the turn on button has no idea whose
+  // turn it's passing, so if the researcher finished a moment before it landed, it skipped the next person
+  // too. Taking the corp out of the sitting and sitting them straight back down only moves the turn on if
+  // it is still theirs; they keep their seat and the rotation carries on as normal.
+  async function skipCorp(corpId) {
+    await post(`/research/session/seats/${corpId}`, { playing: false });
+    try {
+      await post(`/research/session/seats/${corpId}`, { playing: true });
+    } catch (e) {
+      // One retry: leaving them out of the sitting would be worse than the skip.
+      try { await post(`/research/session/seats/${corpId}`, { playing: true }); }
+      catch { throw Object.assign(new Error(`they were taken out but couldn’t be sat back down (${e.message}). Click Sit down for them on the Research page.`), { auth: e.auth }); }
+    }
+  }
   const currentSeat = s => (s && (s.seats || []).find(x => x.is_turn)) || null;
 
   // Any turn start time the site may send, on the seat or the sitting.
@@ -94,14 +109,14 @@ window.RHTable = function createTable(deps) {
       const fresh = await fetchPage(researchPath());
       const seat = currentSeat(fresh.props.research.session);
       if (!seat || seat.corporation_id !== turn.corpId) { refreshNow(); return; }
-      await post('/research/session/advance', {});
+      await skipCorp(turn.corpId);
       const who = (m.corpById.get(turn.corpId) || { name: seat.name }).name;
       addLog({ kind: 'skip', corp: turn.corpId, text: `Skipped ${who}’s research turn after ${clock(elapsed)} (limit ${clock(limit)})` });
       st.error = null;
       refreshNow();
     } catch (e) {
       console.error(e);
-      st.error = `Could not pass the turn on: ${e.message}`;
+      st.error = `Could not skip the turn: ${e.message}`;
       if (e.auth) { st.settings.auto = false; save(); st.error += ' Automatic skipping is off.'; }
     } finally {
       st.skipping = false;
@@ -114,14 +129,14 @@ window.RHTable = function createTable(deps) {
     if (!st.turn || st.skipping) return;
     st.skipping = true; render();
     try {
-      await post('/research/session/advance', {});
+      await skipCorp(st.turn.corpId);
       const who = (m.corpById.get(st.turn.corpId) || { name: 'the researcher' }).name;
-      addLog({ kind: 'skip', corp: st.turn.corpId, text: `Passed the turn on from ${who} by hand` });
+      addLog({ kind: 'skip', corp: st.turn.corpId, text: `Skipped ${who}’s research turn by hand` });
       st.turn.skipping = true;
       st.error = null;
       refreshNow();
     } catch (e) {
-      st.error = `Could not pass the turn on: ${e.message}`;
+      st.error = `Could not skip the turn: ${e.message}`;
     } finally { st.skipping = false; render(); }
   }
 

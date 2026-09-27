@@ -175,6 +175,7 @@
       prerequisites: (Array.isArray(t.prerequisites) ? t.prerequisites : String(t.prerequisites || '').split(';')).map(n => String(n).trim()).filter(Boolean),
       kids: [],
       unknown: [],
+      miscased: [],
     }));
     const byName = new Map(), byId = new Map(), byKey = new Map();
     techs.forEach(t => { byName.set(t.name, t); byId.set(t.id, t); if (!byKey.has(nameKey(t.name))) byKey.set(nameKey(t.name), t); });
@@ -183,6 +184,9 @@
     techs.forEach(t => {
       t.prerequisites = t.prerequisites.map(n => {
         const q = byKey.get(nameKey(n));
+        // The site matches prerequisites by exact text, so a different capital letter or apostrophe
+        // leaves the tech locked for players even though it looks right. Keep track of those.
+        if (q && q.name !== n) t.miscased.push({ typed: n, actual: q.name });
         if (q) return q.name;
         t.unknown.push(n);
         return n;
@@ -407,7 +411,13 @@
   }
 
   // ---------- Corps ----------
+  // Redrawing the cards while someone is typing in one (points, Place in…) would lose their place, so
+  // wait until they leave the field.
+  let corpsStale = false;
   function renderCorps(m) {
+    const f = document.activeElement;
+    if (f && $('corps').contains(f) && /^(INPUT|SELECT|TEXTAREA)$/.test(f.tagName)) { corpsStale = true; return; }
+    corpsStale = false;
     $('corpNote').textContent = 'Options cover every tree: prerequisites can be researched, copied or stolen';
     $('corps').innerHTML = m.corps.map(c => {
       const opts = optionsFor(m, c, null);
@@ -422,14 +432,14 @@
       const stdTotal = m.techs.filter(t => t.tree === 'standard' && t.kind === 'research').length;
       const stdHave = m.techs.filter(t => t.tree === 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
       const otherHave = m.techs.filter(t => t.tree !== c.slug && t.tree !== 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
-      const held = c.holdings.map(h => {
+      const held = c.holdings.filter(h => h.status !== 'destroyed').map(h => {
         const cls = [!isUsable(h) && !needsPlace(h) ? 'off' : '', needsPlace(h) ? 'unplaced' : '', h.origin && h.origin !== 'researched' ? 'copy' : ''].join(' ');
         // Claimed = a traded or stolen copy the corp hasn't paid for yet. It takes a slot but doesn't work
         // until its research player pays the cost less the discount.
         const where = h.status === 'claimed'
           ? `${h.facility_id ? h.facility : 'Needs a facility'} · not paid for yet${h.discount_percent ? ` (${h.discount_percent}% off)` : ''}`
           : !isUsable(h) ? `${h.status_label || h.status || 'Not working'} · not working` : h.facility || 'Not in a facility';
-        return `<li class="${cls}" data-origin="${esc(h.origin_label || '')}"><span class="n">${esc(h.name)}</span><span class="f">${esc(where)}</span>${needsPlace(h) ? placeHTML(c, h) : ''}</li>`;
+        return `<li class="${cls}" data-origin="${esc(h.origin_label || '')}"><span class="n">${esc(h.name)}</span><span class="f">${esc(where)}</span>${needsPlace(h) ? placeHTML(c, h) : ''}${h.status === 'claimed' ? payHTML(c, h) : ''}${destroyHTML(c, h)}</li>`;
       }).join('') || '<li><span class="n">Nothing held</span></li>';
       const sums = {}; m.suits.forEach(s => { sums[s.value] = 0; });
       c.hand.forEach(card => { if (sums[card.suit] != null) sums[card.suit] += +card.value || 0; });
@@ -463,7 +473,8 @@
         <div class="pos">${beyond ? `<b>${beyond} tech${beyond === 1 ? '' : 's'} beyond the start</b>` : '<b>Starting techs only</b>'} · own tree ${ownHave}/${ownTotal} · Standard ${stdHave}/${stdTotal}${otherHave ? ` · ${otherHave} from other trees` : ''}</div>
         <ul class="held">${held}</ul>
         <div class="sub"><span class="mini">Facility space</span><span class="spacehead">${spaceHead}</span>${waitNote}<ul class="facs">${facRows || '<li><span class="n">No facilities</span></li>'}</ul></div>
-        <div class="sub"><span class="mini">Research Points</span><div class="suits">${m.suits.map(s => `<span class="chip rp${c.points[s.value] ? '' : ' zero'}">${c.points[s.value] || 0} ${esc(s.label)}</span>`).join('')}</div></div>
+        <div class="sub"><span class="mini">Research Points</span><div class="suits">${m.suits.map(s => `<span class="chip rp${c.points[s.value] ? '' : ' zero'}">${c.points[s.value] || 0} ${esc(s.label)}</span>`).join('')}</div>${rpAdjustHTML(m, c)}</div>
+        ${mintHTML(c)}
         <div class="sub"><span class="mini">Hand: ${c.hand.length} cards, ${handTotal} points${wild ? `, ${wild} wild` : ''} · deck ${c.deck_remaining ?? '?'}</span><div class="suits">${m.suits.map(s => `<span class="chip${sums[s.value] ? '' : ' zero'}">${sums[s.value]} ${esc(s.label)}</span>`).join('')}</div></div>
         <div class="sub"><span class="mini">${open.length} open · ${ready.length} ready now (prerequisites, points and space)</span>
           ${ready.length ? `<div class="opts">${ready.slice(0, 8).map(lnk).join('')}${ready.length > 8 ? `<span class="mini">+${ready.length - 8} more</span>` : ''}</div>`
@@ -475,6 +486,12 @@
     }).join('');
     $('corps').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go, true)));
     $('corps').querySelectorAll('[data-place]').forEach(b => b.addEventListener('click', () => placeHolding(b)));
+    $('corps').querySelectorAll('[data-pay]').forEach(b => b.addEventListener('click', () => payClick(b)));
+    bindRpAdjust(m);
+    $('corps').querySelectorAll('[data-destroy]').forEach(b => b.addEventListener('click', () => destroyClick(b)));
+    $('corps').querySelectorAll('[data-refund]').forEach(b => b.addEventListener('change', () => { const d = destroyState[b.dataset.refund]; if (d) d.refund = b.checked; }));
+    $('corps').querySelectorAll('[data-mint]').forEach(b => b.addEventListener('click', () => mintClick(b)));
+    $('corps').querySelectorAll('[data-unmint]').forEach(b => b.addEventListener('click', () => unmintClick(b)));
     $('corps').querySelectorAll('[data-focus]').forEach(b => b.addEventListener('click', () => setFocus(+b.dataset.focus)));
   }
 
@@ -520,6 +537,276 @@
     clearTimeout(state.timer);
     state.hash = null;
     refresh();
+  }
+
+  // ---------- Settling claimed copies ----------
+  // A claimed copy (traded or stolen) only works once its research player pays for it. When that went
+  // wrong, Control can settle it here: charge them the discounted cost, or waive it. The site has no
+  // "mark as paid", so the claimed copy is swapped for a Researched one: the new copy is added first,
+  // then the claimed one destroyed, then the new one moved into the same facility, so the corp never
+  // loses the tech part-way.
+  const owed = (m, h) => {
+    const t = m.byId.get(h.technology_type_id) || m.byName.get(h.name);
+    const pct = Math.max(0, Math.min(100, +h.discount_percent || 0));
+    return m.suits.map(s => ({ s, n: Math.ceil(((t && t.cost[s.value]) || 0) * (100 - pct) / 100) })).filter(x => x.n > 0);
+  };
+  const owedText = list => list.map(x => `${x.n} ${x.s.label}`).join(', ');
+  const payArmed = {};
+
+  function payHTML(c, h) {
+    const m = state.model, list = owed(m, h);
+    const short = list.filter(x => (c.points[x.s.value] || 0) < x.n);
+    const armed = payArmed[h.id];
+    const charge = list.length
+      ? `<button type="button" class="btn" data-pay="charge" data-holding="${h.id}" data-corp="${c.id}"${short.length ? ' disabled' : ''}>${armed === 'charge' ? `Confirm: charge ${esc(owedText(list))}` : `Charge ${esc(owedText(list))} and mark paid`}</button>`
+      : '';
+    const waive = `<button type="button" class="btn quiet" data-pay="waive" data-holding="${h.id}" data-corp="${c.id}">${armed === 'waive' ? 'Confirm: mark paid, no charge' : 'Mark paid, no charge'}</button>`;
+    const note = short.length ? `<span class="place-msg bad">Can’t charge: short by ${esc(short.map(x => `${x.n - (c.points[x.s.value] || 0)} ${x.s.label}`).join(', '))}.</span>` : '';
+    const msg = placeMsgs['pay' + h.id] ? `<span class="place-msg ${placeMsgs['pay' + h.id].ok ? 'ok' : 'bad'}">${esc(placeMsgs['pay' + h.id].text)}</span>` : '';
+    return `<div class="place pay">${charge}${waive}${note}${msg}</div>`;
+  }
+
+  function payClick(btn) {
+    const id = +btn.dataset.holding, mode = btn.dataset.pay;
+    if (payArmed[id] !== mode) {
+      // First click arms it; a second click within 5 seconds does it.
+      payArmed[id] = mode;
+      renderCorps(state.model);
+      setTimeout(() => { if (payArmed[id] === mode) { delete payArmed[id]; if (state.model) renderCorps(state.model); } }, 5000);
+      return;
+    }
+    delete payArmed[id];
+    settleClaim(+btn.dataset.corp, id, mode === 'charge');
+  }
+
+  async function settleClaim(corpId, holdingId, charge) {
+    const m = state.model, c = m.corpById.get(corpId);
+    const h = c && c.holdings.find(x => x.id === holdingId);
+    if (!h) return;
+    const t = m.byId.get(h.technology_type_id) || m.byName.get(h.name);
+    const list = charge ? owed(m, h) : [];
+    const key = 'pay' + holdingId;
+    const done = [];
+    placeMsgs[key] = { ok: true, text: 'Working…' };
+    renderCorps(m);
+    const researchHoldings = async () => (await fetchPage(researchUrl(state.gameUrl))).props.research.corporations.find(x => x.id === corpId).holdings;
+    try {
+      const before = new Set(c.holdings.map(x => x.id));
+      await postToGame('/technology-holdings', { corporation_id: corpId, technology_type_id: h.technology_type_id, origin: 'researched', facility_id: null, discount_percent: null }, { json: true });
+      const fresh = (await researchHoldings()).find(x => !before.has(x.id) && x.technology_type_id === h.technology_type_id && x.status === 'researched');
+      if (!fresh) throw new Error('the site didn’t add the working copy. Nothing changed.');
+      done.push('added a working copy');
+      await postToGame(`/technology-holdings/${holdingId}`, {}, { method: 'DELETE' });
+      done.push('removed the claimed copy');
+      if (h.facility_id) {
+        await postToGame(`/technology-holdings/${fresh.id}`, { facility_id: h.facility_id }, { method: 'PATCH' });
+        done.push(`placed it in ${h.facility}`);
+      }
+      for (const x of list) {
+        await postToGame('/trackers', { subject_type: 'corporation', subject_id: corpId, tracker: `research_${x.s.value}`, mode: 'adjust', value: -x.n, reason: `Paid for ${h.name} (${h.origin_label || h.origin}${h.discount_percent ? `, ${h.discount_percent}% off` : ''})` });
+        done.push(`charged ${x.n} ${x.s.label}`);
+      }
+      const after = (await researchHoldings()).find(x => x.id === fresh.id);
+      if (!after || !after.usable) throw new Error('the new copy isn’t showing as working.');
+      addLog({ kind: 'gain', corp: corpId, tech: t ? t.name : h.name, text: `${c.name}’s ${h.name} marked paid${list.length ? `, charged ${owedText(list)}` : ', no charge'}${after.facility ? ` · ${after.facility}` : ''}` });
+    } catch (e) {
+      console.error(e);
+      placeMsgs[key] = { ok: false, text: `Stopped part-way: ${done.length ? done.join(', ') + ', then ' : ''}${e.message} Check ${c.name} on the Research page.` };
+      addLog({ kind: 'loss', corp: corpId, tech: h.name, text: `Settling ${c.name}’s ${h.name} stopped part-way: ${e.message}` });
+    }
+    clearTimeout(state.timer);
+    state.hash = null;
+    refresh();
+  }
+
+  // ---------- Charging or adding Research Points ----------
+  // The same adjustment the game panel's point buttons make, one per suit, each with a reason in the game
+  // log. What you've typed is kept across refreshes, which redraw the corp cards.
+  const rpDraft = {};   // corpId -> { open, cog, brain, leaf, maths, reason, armed, msg }
+  const draft = id => rpDraft[id] || (rpDraft[id] = { open: false, reason: '' });
+  const rpAmounts = (m, d) => m.suits.map(s => ({ s, n: Math.max(0, Math.round(+d[s.value] || 0)) })).filter(x => x.n > 0);
+
+  function rpAdjustHTML(m, c) {
+    const d = draft(c.id), list = rpAmounts(m, d);
+    const short = list.filter(x => (c.points[x.s.value] || 0) < x.n);
+    const what = list.map(x => `${x.n} ${x.s.label}`).join(', ');
+    const btn = (mode, label, extra) => `<button type="button" class="btn${mode === 'charge' ? '' : ' quiet'}" data-rp="${mode}" data-corp="${c.id}"${!list.length || extra ? ' disabled' : ''}>${d.armed === mode ? `Confirm: ${mode === 'charge' ? 'charge' : 'add'} ${esc(what)}` : label}</button>`;
+    return `<details class="rp-adjust" data-corp="${c.id}"${d.open ? ' open' : ''}>
+      <summary>Charge or add points</summary>
+      <div class="rp-grid">${m.suits.map(s => `<label for="rp-${c.id}-${s.value}">${esc(s.label)}<input id="rp-${c.id}-${s.value}" type="number" min="0" step="1" inputmode="numeric" data-suit="${s.value}" value="${d[s.value] ?? ''}"></label>`).join('')}</div>
+      <label class="rp-reason" for="rp-${c.id}-reason">Reason <input id="rp-${c.id}-reason" data-suit="reason" autocomplete="off" placeholder="Shown in the game log" value="${esc(d.reason || '')}"></label>
+      <div class="rp-acts">${btn('charge', 'Charge', short.length)}${btn('add', 'Add')}</div>
+      ${short.length ? `<span class="place-msg bad">Can’t charge: short by ${esc(short.map(x => `${x.n - (c.points[x.s.value] || 0)} ${x.s.label}`).join(', '))}.</span>` : ''}
+      ${d.msg ? `<span class="place-msg ${d.msg.ok ? 'ok' : 'bad'}">${esc(d.msg.text)}</span>` : ''}
+    </details>`;
+  }
+
+  function bindRpAdjust(m) {
+    $('corps').querySelectorAll('.rp-adjust').forEach(el => {
+      const id = +el.dataset.corp, d = draft(id);
+      el.addEventListener('toggle', () => { d.open = el.open; });
+      el.querySelectorAll('input').forEach(inp => inp.addEventListener('input', () => {
+        d[inp.dataset.suit] = inp.value; d.armed = null; d.msg = null;
+        // Only the buttons and warnings change while typing; redrawing the card would steal focus.
+        const c = m.corpById.get(id), tmp = document.createElement('div');
+        tmp.innerHTML = rpAdjustHTML(m, c);
+        el.querySelector('.rp-acts').replaceWith(tmp.querySelector('.rp-acts'));
+        el.querySelectorAll('.place-msg').forEach(x => x.remove());
+        tmp.querySelectorAll('.place-msg').forEach(x => el.appendChild(x));
+        el.querySelectorAll('[data-rp]').forEach(b => b.addEventListener('click', () => rpClick(b)));
+      }));
+    });
+    $('corps').querySelectorAll('[data-rp]').forEach(b => b.addEventListener('click', () => rpClick(b)));
+  }
+
+  function rpClick(btn) {
+    const id = +btn.dataset.corp, mode = btn.dataset.rp, d = draft(id);
+    if (d.armed !== mode) {
+      d.armed = mode;
+      renderCorps(state.model);
+      setTimeout(() => { if (d.armed === mode) { d.armed = null; if (state.model) renderCorps(state.model); } }, 5000);
+      return;
+    }
+    d.armed = null;
+    adjustPoints(id, mode === 'charge' ? -1 : 1);
+  }
+
+  async function adjustPoints(corpId, sign) {
+    const m = state.model, c = m.corpById.get(corpId), d = draft(corpId);
+    const list = rpAmounts(m, d);
+    if (!list.length) return;
+    const reason = (d.reason || '').trim() || (sign < 0 ? 'Charged by Control' : 'Added by Control');
+    const done = [];
+    d.msg = { ok: true, text: 'Working…' };
+    renderCorps(m);
+    try {
+      for (const x of list) {
+        await postToGame('/trackers', { subject_type: 'corporation', subject_id: corpId, tracker: `research_${x.s.value}`, mode: 'adjust', value: sign * x.n, reason });
+        done.push(`${x.n} ${x.s.label}`);
+      }
+      const after = (await fetchPage(researchUrl(state.gameUrl))).props.research.corporations.find(x => x.id === corpId);
+      const now = m.suits.map(s => `${after.points[s.value] || 0} ${s.label}`).join(', ');
+      d.msg = { ok: true, text: `${sign < 0 ? 'Charged' : 'Added'} ${done.join(', ')}. ${c.name} now has ${now}.` };
+      m.suits.forEach(s => { d[s.value] = ''; });
+      d.reason = '';
+      addLog({ kind: 'points', corp: corpId, text: `${sign < 0 ? 'Charged' : 'Gave'} ${c.name} ${done.join(', ')} (${reason})` });
+    } catch (e) {
+      console.error(e);
+      d.msg = { ok: false, text: `${done.length ? `Did ${done.join(', ')}, then stopped: ` : 'Nothing changed: '}${e.message}` };
+    }
+    clearTimeout(state.timer);
+    state.hash = null;
+    refresh();
+  }
+
+  // ---------- Minting extra unlocked cards ----------
+  const mintArmed = {}, mintMsgs = {};
+  function mintHTML(c) {
+    if (typeof handouts === 'undefined') return '';
+    const opts = handouts.mintOptions(c.id);
+    if (!opts.length) return '';
+    const rows = opts.map(o => {
+      const short = o.cost.filter(x => (c.points[x.s.value] || 0) < x.n);
+      const price = o.cost.map(x => `${x.n} ${x.s.label}`).join(', ') || 'free';
+      const key = `${c.id}|${o.id}`, msg = mintMsgs[key];
+      const held = o.versions.length > 1 ? o.versions.map(v => `${esc(v.code)}: ${v.held}`).join(', ') : `holds ${o.held}`;
+      return `<li><span class="n">${esc(o.name)}${o.versions.length > 1 ? ` <span class="mini">×${o.versions.length} versions</span>` : ''}</span><span class="f">${held}${o.kind === 'equipment' ? ` · ${esc(o.to)}` : ''}</span>
+        <div class="place"><button type="button" class="btn" data-mint="${esc(o.id)}" data-corp="${c.id}"${short.length ? ' disabled' : ''} title="Half of ${esc(o.tech)}’s research cost, rounded up">${mintArmed[key] ? `Confirm: mint for ${esc(price)}` : `Mint another · ${esc(price)}`}</button>
+        <button type="button" class="btn quiet" data-unmint="${esc(o.id)}" data-corp="${c.id}"${o.removable ? '' : ` disabled title="${o.kind === 'protection' ? 'No copy in hand to take back; installed copies must be uninstalled first' : 'Nobody on the corp holds one'}"`}>${mintArmed['undo' + key] ? `Confirm: take one back, refund ${esc(price)}` : `Refund one · ${esc(price)}`}</button>
+        ${short.length ? `<span class="place-msg bad">Short by ${esc(short.map(x => `${x.n - (c.points[x.s.value] || 0)} ${x.s.label}`).join(', '))}</span>` : ''}
+        ${msg ? `<span class="place-msg ${msg.ok ? 'ok' : 'bad'}">${esc(msg.text)}</span>` : ''}</div></li>`;
+    }).join('');
+    return `<div class="sub"><span class="mini">Unlocked cards · mint another for half the tech’s cost</span><ul class="held mint">${rows}</ul></div>`;
+  }
+
+  function mintClick(btn) {
+    const corpId = +btn.dataset.corp, itemId = btn.dataset.mint, key = `${corpId}|${itemId}`;
+    if (!mintArmed[key]) {
+      mintArmed[key] = true;
+      renderCorps(state.model);
+      setTimeout(() => { if (mintArmed[key]) { delete mintArmed[key]; if (state.model) renderCorps(state.model); } }, 5000);
+      return;
+    }
+    delete mintArmed[key];
+    mintMsgs[key] = { ok: true, text: 'Minting…' };
+    renderCorps(state.model);
+    handouts.mint(corpId, itemId)
+      .then(r => { mintMsgs[key] = { ok: true, text: `Minted ${r.given.length > 1 ? r.given.join(' and ') : 'it'}. They now hold ${r.held}; charged ${r.charged.join(', ') || 'nothing'}.` }; })
+      .catch(e => { console.error(e); mintMsgs[key] = { ok: false, text: e.partial ? `Partly done: ${e.message}` : `Nothing changed: ${e.message}` }; })
+      .finally(() => { clearTimeout(state.timer); state.hash = null; refresh(); });
+  }
+
+  // ---------- Destroying a held tech, with an optional refund ----------
+  // The same as the Research page's Destroy button (the tech is marked Destroyed and its slot freed).
+  // The refund gives back exactly what the site recorded them paying for it, one adjustment per suit.
+  const destroyState = {};   // holdingId -> { open, refund, msg }
+  const paidList = (m, h) => m.suits.map(s => ({ s, n: +((h.paid || {})[s.value]) || 0 })).filter(x => x.n > 0);
+
+  function destroyHTML(c, h) {
+    const d = destroyState[h.id];
+    if (!d || !d.open) return `<button type="button" class="destroy-link" data-destroy="open" data-holding="${h.id}" data-corp="${c.id}" title="Destroy…" aria-label="Destroy ${esc(h.name)}…">✕</button>`;
+    const paid = paidList(state.model, h);
+    const paidText = paid.map(x => `${x.n} ${x.s.label}`).join(', ');
+    return `<div class="place destroy">
+      <span class="destroy-q">Destroy ${esc(h.name)} for ${esc(c.name)}?</span>
+      <label class="switch" for="refund-${h.id}"><input type="checkbox" id="refund-${h.id}" data-refund="${h.id}"${paid.length && d.refund ? ' checked' : ''}${paid.length ? '' : ' disabled'}> ${paid.length ? `Refund what they paid (${esc(paidText)})` : 'Refund: they paid nothing for this copy'}</label>
+      <button type="button" class="btn danger" data-destroy="go" data-holding="${h.id}" data-corp="${c.id}">Destroy</button>
+      <button type="button" class="btn quiet" data-destroy="cancel" data-holding="${h.id}" data-corp="${c.id}">Cancel</button>
+      ${d.msg ? `<span class="place-msg ${d.msg.ok ? 'ok' : 'bad'}">${esc(d.msg.text)}</span>` : ''}
+    </div>`;
+  }
+
+  function destroyClick(btn) {
+    const id = +btn.dataset.holding, what = btn.dataset.destroy;
+    if (what === 'open') destroyState[id] = { open: true, refund: true };
+    else if (what === 'cancel') delete destroyState[id];
+    else if (what === 'go') { destroyHolding(+btn.dataset.corp, id); return; }
+    renderCorps(state.model);
+  }
+
+  async function destroyHolding(corpId, holdingId) {
+    const m = state.model, c = m.corpById.get(corpId), h = c && c.holdings.find(x => x.id === holdingId);
+    const d = destroyState[holdingId];
+    if (!h || !d) return;
+    const refund = d.refund ? paidList(m, h) : [];
+    d.msg = { ok: true, text: 'Working…' };
+    renderCorps(m);
+    const done = [];
+    try {
+      await postToGame(`/technology-holdings/${holdingId}`, {}, { method: 'DELETE' });
+      const after = (await fetchPage(researchUrl(state.gameUrl))).props.research.corporations.find(x => x.id === corpId).holdings.find(x => x.id === holdingId);
+      if (after && after.status !== 'destroyed') throw new Error('the site didn’t destroy it. Nothing changed.');
+      done.push('destroyed');
+      for (const x of refund) {
+        await postToGame('/trackers', { subject_type: 'corporation', subject_id: corpId, tracker: `research_${x.s.value}`, mode: 'adjust', value: x.n, reason: `Refund for ${h.name}` });
+        done.push(`refunded ${x.n} ${x.s.label}`);
+      }
+      delete destroyState[holdingId];
+      addLog({ kind: 'loss', corp: corpId, tech: h.name, text: `Destroyed ${c.name}’s ${h.name}${refund.length ? `, refunded ${refund.map(x => `${x.n} ${x.s.label}`).join(', ')}` : ''}` });
+    } catch (e) {
+      console.error(e);
+      d.msg = { ok: false, text: done.length ? `Stopped part-way (${done.join(', ')}): ${e.message} Adjust their points by hand.` : `Nothing changed: ${e.message}` };
+    }
+    clearTimeout(state.timer);
+    state.hash = null;
+    refresh();
+  }
+
+  function unmintClick(btn) {
+    const corpId = +btn.dataset.corp, itemId = btn.dataset.unmint, key = `${corpId}|${itemId}`, armKey = 'undo' + key;
+    if (!mintArmed[armKey]) {
+      mintArmed[armKey] = true;
+      renderCorps(state.model);
+      setTimeout(() => { if (mintArmed[armKey]) { delete mintArmed[armKey]; if (state.model) renderCorps(state.model); } }, 5000);
+      return;
+    }
+    delete mintArmed[armKey];
+    mintMsgs[key] = { ok: true, text: 'Taking one back…' };
+    renderCorps(state.model);
+    handouts.unmint(corpId, itemId)
+      .then(r => { mintMsgs[key] = { ok: true, text: `Took back ${r.taken.length > 1 ? r.taken.join(' and ') : 'one'}. They now hold ${r.held}; refunded ${r.refunded.join(', ') || 'nothing'}.` }; })
+      .catch(e => { console.error(e); mintMsgs[key] = { ok: false, text: e.partial ? `Partly done: ${e.message}` : `Nothing changed: ${e.message}` }; })
+      .finally(() => { clearTimeout(state.timer); state.hash = null; refresh(); });
   }
 
   // ---------- Log ----------
@@ -695,6 +982,12 @@
       sec.className = 'tree'; sec.id = 'tree-' + key; sec.style.cssText = cv(tree.color) + (fc ? `;--fc:${fc.color}` : '');
       const haveCount = fc ? res.filter(t => ctx.have.has(t.name)).length : null;
       sec.innerHTML = `<div class="tree-head"><h2>${esc(tree.name)}</h2><span class="count">${res.length} techs · deepest chain ${maxD + 1} step${maxD ? 's' : ''}${fc ? ` · ${esc(fc.name)} holds ${haveCount}` : ''}</span></div>`;
+      const miscased = all.filter(t => t.miscased.length);
+      if (miscased.length) {
+        const p = document.createElement('p'); p.className = 'warnnote';
+        p.innerHTML = `<b>Prerequisite spelled differently from the tech:</b> ${miscased.map(t => `${esc(t.name)} needs ${t.miscased.map(x => `“${esc(x.typed)}” (the tech is “${esc(x.actual)}”)`).join(', ')}`).join('; ')}. The site matches names exactly, so players can’t research ${miscased.length === 1 ? 'it' : 'these'} yet. Open ${miscased.length === 1 ? 'it' : 'each one'} with <b>Edit this tech…</b> and save to fix the spelling.`;
+        sec.appendChild(p);
+      }
       const broken = all.filter(t => t.unknown.length);
       if (broken.length) {
         const p = document.createElement('p'); p.className = 'warnnote';
@@ -830,7 +1123,8 @@
         const short = m.suits.filter(s => (t.cost[s.value] || 0) > (fc.points[s.value] || 0));
         const sp = fc.space, room = roomFor(sp, t);
         const typeFree = t.required_facility_type ? Math.min(sp.byType[normType(t.required_facility_type)] || 0, sp.free) : sp.free;
-        const verdict = t.unknown.length ? `Can’t be researched yet: ${t.unknown.map(n => `“${n}”`).join(', ')} ${t.unknown.length === 1 ? 'is' : 'are'} not in the game.`
+        const verdict = t.miscased.length ? `Players can’t research this yet: its prerequisite ${t.miscased.map(x => `“${x.typed}” should be “${x.actual}”`).join(', ')}. Use Edit this tech… and save to fix it.`
+          : t.unknown.length ? `Can’t be researched yet: ${t.unknown.map(n => `“${n}”`).join(', ')} ${t.unknown.length === 1 ? 'is' : 'are'} not in the game.`
           : missing.length ? `Needs ${missing.length} more prerequisite${missing.length === 1 ? '' : 's'} first.`
           : short.length ? `Prerequisites met. Short on ${short.map(s => `${s.label} by ${(t.cost[s.value] || 0) - (fc.points[s.value] || 0)}`).join(', ')}.`
           : room ? 'Ready: prerequisites met, it can pay, and it has space.'
@@ -862,9 +1156,10 @@
       </dl>
       ${corpBox}
       ${t.kind === 'research' ? `<div class="box"><span class="t">Cost from scratch · ${anc.size + 1} tech${anc.size ? 's' : ''}</span><div class="suits">${costChips(m, total)}</div><span class="mini">${sum} Research Points in total${anc.size ? `, including ${esc([...anc].join(', '))}` : ''}</span></div>` : ''}`;
-    if (t.kind === 'research') {
-      $('inspBody').insertAdjacentHTML('beforeend', '<button type="button" class="btn" id="editTech">Edit this tech…</button>');
-      $('editTech').addEventListener('click', () => composer.open('edit', t));
+    if (!t.is_deck_customisation) {
+      $('inspBody').insertAdjacentHTML('beforeend', `<div class="insp-acts">${t.kind === 'research' ? '<button type="button" class="btn" id="editTech">Edit this tech…</button>' : ''}<button type="button" class="btn" id="giveThis">Give to a corp…</button></div>`);
+      if ($('editTech')) $('editTech').addEventListener('click', () => composer.open('edit', t));
+      $('giveThis').addEventListener('click', () => giver.open(t, state.focusCorp));
     }
     $('insp').classList.remove('empty');
     $('inspBody').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go, true)));
@@ -904,6 +1199,12 @@
     esc, keyOf: nameKey, getModel: () => state.model, fetchPage, gameBase, post: postToGame, addLog, select,
     refreshNow: () => { clearTimeout(state.timer); refresh(); },
     mount: $('composer'),
+  });
+  const giver = window.RHGive({
+    esc, keyOf: nameKey, getModel: () => state.model, fetchPage, post: postToGame, addLog,
+    researchPath: () => researchUrl(state.gameUrl),
+    refreshNow: () => { clearTimeout(state.timer); refresh(); },
+    mount: $('giver'),
   });
 
   // ---------- Orchestration ----------
@@ -953,7 +1254,9 @@
         renderStatus();
       }
       table.observe(m);
+      const hadMint = m.corps.some(c => handouts.mintOptions(c.id).length);
       await handouts.update(m);
+      if (!hadMint && m.corps.some(c => handouts.mintOptions(c.id).length)) renderCorps(m);
       setLive(state.paused ? 'paused' : 'ok', state.paused ? 'Paused' : 'Live');
     } catch (e) {
       console.error(e);
@@ -1006,6 +1309,10 @@
   });
   $('autoHand').addEventListener('change', () => handouts.setAuto($('autoHand').checked));
   $('newResearch').addEventListener('click', () => composer.open('new'));
+  $('giveTech').addEventListener('click', () => giver.open(null, state.focusCorp));
+  $('corps').addEventListener('focusout', () => setTimeout(() => {
+    if (corpsStale && state.model && !$('corps').contains(document.activeElement)) renderCorps(state.model);
+  }, 0));
   $('closeInsp').addEventListener('click', clearSelection);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') clearSelection(); });
   document.addEventListener('click', e => {

@@ -43,7 +43,7 @@ While Control has a research sitting open (it opens when the Action phase starts
 
 Settings (remembered in the browser):
 
-- **Skip automatically:** off by default. When on, anyone who goes over the limit has the turn passed on, the same as Control's **Pass the turn on** button, and it's logged in **Changes**. Before skipping, the tool re-reads the site; if the turn has already moved on, it does nothing, so the next researcher never loses time.
+- **Skip automatically:** off by default. When on, anyone who goes over the limit is skipped, and it's logged in **Changes**. The skip names that corp. It takes them out of the sitting and sits them straight back down, which moves the turn on only if it is still theirs, and they keep their seat. So if they finish just before the deadline, the next researcher isn't skipped by mistake, which Control's **Pass the turn on** button can do. The game log shows each skip as a take-out and sit-down.
 - **Time limit:** **Fixed** uses *Seconds per turn*. **Follow the suggestion** uses the suggested limit as it changes.
 - **Cards per turn** and **Reserve at the end** tune the suggestion.
 - **Skip now** passes the turn on by hand.
@@ -59,6 +59,8 @@ When a corp gains a tech whose effect says **Unlock: …**, the **Hand-outs** se
 - **Facility types** (Power, Arms, ID…): skipped. There's nothing to hand out for them on the site.
 
 **Hand out automatically** is on by default. Research the tool sees happen is handed out within one refresh and logged in **Changes**. Anything already owed when the tool first opened a game is marked **Owed from before**. It's never given automatically; click **Give**, or **Mark done** if you've dealt with it another way.
+
+**Cards with several versions** (two protection cards with the same name, like Doppleganger PX011 and PX012) are owed one of *each* version. Each version is listed, checked and given separately, and **Mint another** gives one of each version for the one price.
 
 **It never gives twice.** An item counts as done once the corp has been seen holding the card (in hand or installed), the tool has given it, or you've marked it done. That's remembered in the browser even after the card is used up and returned to Control. Each item is recorded before it's sent, so a slow site can't cause a second copy.
 
@@ -79,6 +81,38 @@ A tech a corp holds but hasn't put in a facility shows **Needs a facility** on i
 
 **Claimed** techs are copies a corp got by trade or theft and hasn't paid for yet. They take up a slot straight away, but don't work (and don't count as prerequisites or trigger hand-outs) until the corp's research player pays for them, at the research cost minus the copy's discount. Placing one doesn't change that.
 
+## Giving a tech
+
+**Give a tech…** in the header (or **Give to a corp…** in the side panel) hands a corp a technology card in one step:
+
+- Search for the tech, pick the corp, and it goes into the facility with the most room that can take it: a free slot, of the tech's required type. You can pick another facility, or none.
+- **How they got it** defaults to **Researched**, which arrives working. The copy options (shared, weak, good, stolen) arrive **Claimed** and still have to be paid for.
+- **Charge them the research cost** (Researched only) also takes the full cost off the corp's Research Points, one adjustment per suit with a reason in the game log. It won't send if they can't afford it.
+- It warns if the corp already holds that tech. After giving, it re-reads the site to confirm the tech and the charge.
+
+## Minting extra unlocked cards
+
+Each corp card lists the **Unlocked cards** its working techs have unlocked (protection cards and equipment), with how many copies the corp holds. **Mint another** gives one more copy, into the corp's hand for protection cards or to its Security player (else CEO) for equipment. It charges half the unlocking tech's research cost, rounded up in each suit; if two techs unlock the same card, the cheaper one sets the price. The button shows the price and needs a second click to confirm. It checks the corp's current points first and won't mint if they can't afford it. After minting, it re-reads the site to confirm the new copy and logs it. Minting is deliberate, so the hand-outs' "never give twice" rule doesn't block it.
+
+**Refund one** undoes a mint. It takes back one copy of each version and refunds the same half price, with a reason in the game log. It only takes copies still in the corp's hand (or, for equipment, held by its Security player or whoever has one). If every copy is installed, uninstall one on the Facility Defence page first. Hand-outs won't re-give a card after it's taken back.
+
+## Charging or adding Research Points
+
+Each corp card's Research Points section has **Charge or add points**. Enter an amount in any suits and an optional reason (it goes in the game log), then click **Charge** to take the points off, or **Add** to give them. Each needs a second click to confirm. **Charge** is blocked if the corp doesn't have enough. It makes the same per-suit adjustment as the game panel's point buttons, then re-reads the site and shows the new totals. What you've typed is kept while the page refreshes, and the cards don't redraw while you're typing in them.
+
+## Destroying a tech
+
+Every tech on a corp card has **Destroy…**. It asks you to confirm, with **Refund what they paid** ticked by default. The refund gives back exactly what the site recorded them paying for that copy; techs Control handed over for free show they paid nothing. It does the same as the Research page's Destroy (the tech is marked Destroyed and its slot freed), then refunds per suit with a reason in the game log.
+
+## Settling claimed copies
+
+Each **Claimed** tech on a corp card has two buttons, each needing a second click to confirm:
+
+- **Charge … and mark paid:** takes the research cost minus the copy's discount (rounded up) off their Research Points, and turns it into a working copy.
+- **Mark paid, no charge:** turns it into a working copy for free.
+
+The site has no "mark as paid", so the tool swaps the claimed copy for a Researched one: it adds the new copy first, then destroys the claimed one, then moves the new copy into the same facility. That way the corp never loses the tech part-way. If something fails, the message says exactly which steps were done.
+
 ## Research builder
 
 **New research…** in the header (or **Edit this tech…** in the side panel) opens a form for adding techs to Control, instead of the site's own form:
@@ -88,6 +122,13 @@ A tech a corp holds but hasn't put in a facility shows **Needs a facility** on i
 - **Checks:** a name or card code that's already taken blocks saving. The preview shows the tier and tree it will land in, prerequisites from other trees, names not in the game yet, and a warning if no cost makes it a starting tech. **Use RGR105** fills in the next free card code for that tree.
 - **Cost:** leave every suit blank for a starting tech. Once any suit has a price, blank suits count as 0.
 - Nothing is sent until you confirm. Afterwards the tool re-reads the Cards page and tells you whether everything was saved.
+
+**New cards to unlock:** tick **Also create a new card for it to unlock** and choose the kind:
+
+- **Defence card:** a name (it defaults to the tech's name), an availability (Research only by default), then a **Physical** version, a **Cyber** version, or both, each with its own challenge, consequence, charge and code.
+- **Equipment card:** a name, a type (Permanent, This run or Single use), the card's effect, and an optional cost and code.
+
+The card is created first, and the tech's effect gets "Unlock: card name" added, so hand-outs and minting give it out: defence cards (every version) to the corp's hand, equipment to its Security player. The preview also checks every "Unlock:" name in the effect against the game's cards, equipment, techs and facility types, and warns when one is misspelled or missing.
 
 **Editing** uses a route the site has but its own page doesn't offer. It was tested on the test game and changes every field, including name, tree, prerequisites and costs. After saving, the tool still re-reads the tech and reports anything that didn't take.
 

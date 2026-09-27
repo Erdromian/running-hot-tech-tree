@@ -19,6 +19,8 @@ window.RHComposer = function createComposer(deps) {
       facilityTypes: (C.props.facilityTypes || []).map(f => ({ id: f.id, name: f.name })),
       suits: C.props.researchSuits || [],
       technologies: C.props.technologies || [],
+      protectionCards: C.props.protectionCards || [],
+      equipment: C.props.equipment || [],
     };
   }
 
@@ -129,6 +131,44 @@ window.RHComposer = function createComposer(deps) {
           <label class="rc-f wide" for="rcDesc">Description <input id="rcDesc" autocomplete="off" placeholder="Making mixed genetic fruits!"></label>
           <label class="rc-f wide" for="rcEffect">Effect <input id="rcEffect" autocomplete="off" placeholder="Increase income, or Unlock: Keresh"></label>
 
+          <div class="rc-f wide rc-card">
+            <label class="switch" for="rcNewCard"><input type="checkbox" id="rcNewCard"> Also create a new card for it to unlock</label>
+            <div id="rcCardForm" class="rc-cardform" hidden>
+              <div class="rc-grid">
+                <label class="rc-f" for="rcCardType">Kind of card
+                  <select id="rcCardType"><option value="defence">Defence card (protection)</option><option value="equipment">Equipment card</option></select>
+                </label>
+                <label class="rc-f" for="rcCardName">Card name <input id="rcCardName" autocomplete="off"></label>
+              </div>
+              <div id="rcEquipForm" class="rc-grid" hidden>
+                <label class="rc-f" for="rcEqCat">Type
+                  <select id="rcEqCat"><option value="permanent">Permanent (equipped before the Run)</option><option value="this-run">This run (lasts the Run)</option><option value="single-use">Single use (applied at once)</option></select>
+                </label>
+                <label class="rc-f" for="rcEqCode">Card code <input id="rcEqCode" autocomplete="off"></label>
+                <label class="rc-f wide" for="rcEqEffect">Card effect <input id="rcEqEffect" autocomplete="off" placeholder="+2 Hack"></label>
+                <label class="rc-f" for="rcEqCost">Cost (optional) <input id="rcEqCost" type="number" min="0" step="1"></label>
+              </div>
+              <div id="rcDefForm">
+              <label class="rc-f" for="rcCardAvail">Availability
+                <select id="rcCardAvail"><option value="research_only">Research only</option><option value="available">On sale</option><option value="rumoured">Rumoured</option></select>
+              </label>
+              <div class="rc-versions">${['physical', 'cyber'].map(k => `
+                <fieldset class="rc-ver" id="rcVer_${k}">
+                  <legend><label class="switch" for="rcV_${k}"><input type="checkbox" id="rcV_${k}"${k === 'physical' ? ' checked' : ''}> ${k === 'physical' ? 'Physical' : 'Cyber'} version</label></legend>
+                  <label class="rc-f" for="rcC_${k}_challenge">Challenge <input id="rcC_${k}_challenge" autocomplete="off" placeholder="${k === 'physical' ? 'Brute (4)' : 'Hack (4)'}"></label>
+                  <label class="rc-f" for="rcC_${k}_consequence">Consequence <input id="rcC_${k}_consequence" autocomplete="off" placeholder="End the Run, 1 Tag"></label>
+                  <div class="rc-grid">
+                    <label class="rc-f" for="rcC_${k}_charge_cost">Charge cost (cr) <input id="rcC_${k}_charge_cost" type="number" min="0" step="1"></label>
+                    <label class="rc-f" for="rcC_${k}_code">Card code <input id="rcC_${k}_code" autocomplete="off"></label>
+                  </div>
+                  <label class="rc-f" for="rcC_${k}_charge_consequence">Charge consequence <input id="rcC_${k}_charge_consequence" autocomplete="off" placeholder="Optional"></label>
+                </fieldset>`).join('')}
+              </div>
+              </div>
+              <span class="mini">The tech’s effect gets “Unlock: card name” added, so hand-outs give it out: defence cards to the corp’s hand (every version), equipment to its Security player.</span>
+            </div>
+          </div>
+
           <div class="rc-f wide">
             <span>Cost in Research Points</span>
             <div class="rc-costs">${COSTS.map(([k, l]) => `<label for="rc_${k}">${l} <input id="rc_${k}" type="number" min="0" step="1" inputmode="numeric"></label>`).join('')}</div>
@@ -165,7 +205,10 @@ window.RHComposer = function createComposer(deps) {
       text.split(/[;,]/).map(s => s.trim()).filter(Boolean).forEach(addChip);
     });
     $('#rcTree').addEventListener('change', () => { st.treeNote = st.treeAuto && $('#rcTree').value !== st.treeAuto ? `You picked this tree. Its prerequisites point to ${treeLabel(st.treeAuto)}.` : st.treeNote; render(); });
-    ['#rcName', '#rcCode', ...COSTS.map(([k]) => '#rc_' + k)].forEach(s => $(s).addEventListener('input', render));
+    ['#rcName', '#rcCode', '#rcEffect', ...COSTS.map(([k]) => '#rc_' + k)].forEach(s => $(s).addEventListener('input', render));
+    $('#rcNewCard').addEventListener('change', () => { $('#rcCardForm').hidden = !$('#rcNewCard').checked; render(); });
+    $('#rcCardType').addEventListener('change', () => { const eq = $('#rcCardType').value === 'equipment'; $('#rcEquipForm').hidden = !eq; $('#rcDefForm').hidden = eq; });
+    mount.querySelectorAll('#rcCardForm input, #rcCardForm select').forEach(el => el.addEventListener(el.type === 'checkbox' || el.tagName === 'SELECT' ? 'change' : 'input', render));
     $('#rcForm').addEventListener('submit', e => { e.preventDefault(); });
   }
 
@@ -195,7 +238,7 @@ window.RHComposer = function createComposer(deps) {
       tree,
       corporation_id: ti ? ti.corporation_id : null,
       description: $('#rcDesc').value.trim() || null,
-      effect: $('#rcEffect').value.trim() || null,
+      effect: finalEffect(),
       cog_cost: cog, brain_cost: brain, leaf_cost: leaf, maths_cost: maths,
       prerequisites: st.chips.join('; ') || null,
       required_facility_type_id: $('#rcHoused').value ? +$('#rcHoused').value : null,
@@ -214,9 +257,72 @@ window.RHComposer = function createComposer(deps) {
     return prefix + String(max + 1).padStart(width, '0');
   }
 
+  // ---------- New defence card ----------
+  const KINDS = [['physical', 'Physical'], ['cyber', 'Cyber']];
+  function cardPlan() {
+    if (!$('#rcNewCard') || !$('#rcNewCard').checked) return null;
+    const name = $('#rcCardName').value.trim() || $('#rcName').value.trim();
+    if ($('#rcCardType').value === 'equipment') {
+      const cost = $('#rcEqCost').value.trim();
+      return { type: 'equipment', name, versions: [], equipment: { category: $('#rcEqCat').value, effect: $('#rcEqEffect').value.trim(), cost: cost === '' ? null : Math.max(0, Math.round(+cost)), code: $('#rcEqCode').value.trim() || null } };
+    }
+    const versions = KINDS.filter(([k]) => $('#rcV_' + k).checked).map(([k, label]) => {
+      const f = n => $(`#rcC_${k}_${n}`).value.trim();
+      return { kind: k, label, challenge: f('challenge'), consequence: f('consequence'), charge_cost: f('charge_cost') === '' ? null : Math.max(0, Math.round(+f('charge_cost'))), charge_consequence: f('charge_consequence') || null, code: f('code') || null };
+    });
+    return { type: 'defence', name, availability: $('#rcCardAvail').value, versions };
+  }
+  // The effect as typed, plus "Unlock: <new card>" when creating one (unless it already says so).
+  function finalEffect() {
+    const typed = $('#rcEffect').value.trim();
+    const plan = cardPlan();
+    if (!plan || !plan.name) return typed || null;
+    if (unlockNames(typed).some(n => keyOf(n) === keyOf(plan.name))) return typed;
+    return typed ? `${typed.replace(/[.\s]+$/, '')}. Unlock: ${plan.name}` : `Unlock: ${plan.name}`;
+  }
+  function unlockNames(effect) {
+    const out = [];
+    for (const mm of String(effect || '').matchAll(/Unlock:\s*([^.]+)/gi)) mm[1].split(/,|\band\b/).forEach(n => { n = n.trim(); if (n) out.push(n); });
+    return out;
+  }
+  // What each "Unlock:" name in the effect refers to, matched exactly the way hand-outs need.
+  function unlockTargets(effect) {
+    const plan = cardPlan();
+    const sources = [
+      ['defence card', st.site.protectionCards.map(c => c.name)],
+      ['equipment', st.site.equipment.map(c => c.name)],
+      ['tech', techs().map(t => t.name)],
+      ['facility type', st.site.facilityTypes.flatMap(f => [f.name, `${f.name} facility`])],
+    ];
+    return unlockNames(effect).map(n => {
+      if (plan && keyOf(n) === keyOf(plan.name)) return { n, ok: true, what: plan.type === 'equipment' ? 'new equipment card' : `new defence card${plan.versions.length > 1 ? 's' : ''}` };
+      for (const [what, names] of sources) {
+        if (names.includes(n)) return { n, ok: true, what };
+        const near = names.find(x => keyOf(x) === keyOf(n));
+        if (near) return { n, ok: false, near, what };
+      }
+      return { n, ok: false };
+    });
+  }
+
   function problems(v) {
     const out = [];
     if (!v.name) out.push('Give it a name.');
+    const plan = cardPlan();
+    if (plan && plan.type === 'equipment') {
+      if (!plan.name) out.push('Give the equipment card a name.');
+      if (!plan.equipment.effect) out.push('The equipment card needs an effect.');
+      const clash = st.site.equipment.find(c => keyOf(c.name) === keyOf(plan.name));
+      if (clash) out.push(`An equipment card called ${clash.name} already exists.`);
+    } else if (plan) {
+      if (!plan.name) out.push('Give the defence card a name.');
+      if (!plan.versions.length) out.push('Tick at least one version of the defence card.');
+      plan.versions.forEach(x => { if (!x.challenge || !x.consequence) out.push(`The ${x.label} version needs a challenge and a consequence.`); });
+      plan.versions.forEach(x => {
+        const clash = st.site.protectionCards.find(c => keyOf(c.name) === keyOf(plan.name) && c.kind === x.kind);
+        if (clash) out.push(`A ${x.label} defence card called ${clash.name} already exists.`);
+      });
+    }
     const clash = techByKey(v.name);
     if (clash && (!st.editing || clash.id !== st.editing.id)) out.push(`A tech called ${clash.name} already exists (${clash.code || 'no code'}, ${treeLabel(clash.tree)}).`);
     if (v.code) {
@@ -240,6 +346,12 @@ window.RHComposer = function createComposer(deps) {
     if (other.length) bits.push(`Also needs ${esc(other.map(t => `${t.name} (${treeLabel(t.tree)})`).join(', '))} from another tree.`);
     if (unknown.length) bits.push(`<span class="bad">${esc(unknown.join(', '))} ${unknown.length === 1 ? 'isn’t' : 'aren’t'} in the game yet, so nobody can research this until ${unknown.length === 1 ? 'it exists' : 'they exist'}.</span>`);
     if (allBlank) bits.push('<span class="bad">No cost in any suit makes this a starting tech.</span>');
+    const unlocks = unlockTargets(v.effect);
+    if (unlocks.length) {
+      bits.push('Unlocks ' + unlocks.map(u => u.ok ? `<b>${esc(u.n)}</b> (${esc(u.what)})`
+        : u.near ? `<span class="bad">“${esc(u.n)}”: the ${esc(u.what)} is spelled “${esc(u.near)}”, and hand-outs need it exact</span>`
+        : `<span class="bad">“${esc(u.n)}”: nothing in the game has that name</span>`).join(', ') + '.');
+    }
     return bits.join(' ');
   }
 
@@ -293,8 +405,31 @@ window.RHComposer = function createComposer(deps) {
 
   async function submit() {
     const v = values();
+    const plan = cardPlan();
     st.busy = true; st.confirm = false; render();
+    const madeCards = [];
     try {
+      if (plan && plan.type === 'equipment') {
+        // The card first: if it can't be made, stop before touching the tech.
+        await post('/equipment-cards', { name: plan.name, category: plan.equipment.category, effect: plan.equipment.effect, cost: plan.equipment.cost, code: plan.equipment.code }, { json: true });
+        const C0 = await fetchPage(gameBase() + '/cards', 'technologies');
+        const made = (C0.props.equipment || []).find(c => keyOf(c.name) === keyOf(plan.name));
+        if (!made) throw new Error(`the site didn’t create the ${plan.name} equipment card.`);
+        madeCards.push('equipment');
+        st.site.equipment = C0.props.equipment || st.site.equipment;
+        addLog({ kind: 'tech', text: `Created equipment card ${plan.name}${made.code ? ` (${made.code})` : ''}` });
+      } else if (plan) {
+        // Cards first: if one can't be made, stop before touching the tech.
+        for (const x of plan.versions) {
+          await post('/protection-cards', { name: plan.name, kind: x.kind, cost: null, code: x.code, challenge: x.challenge, consequence: x.consequence, charge_cost: x.charge_cost, charge_consequence: x.charge_consequence, availability: plan.availability }, { json: true });
+          const C0 = await fetchPage(gameBase() + '/cards', 'technologies');
+          const made = (C0.props.protectionCards || []).find(c => keyOf(c.name) === keyOf(plan.name) && c.kind === x.kind);
+          if (!made) throw new Error(`the site didn’t create the ${x.label} ${plan.name} card${madeCards.length ? ` (made ${madeCards.join(', ')} before it)` : ''}.`);
+          madeCards.push(`${x.label}${made.code ? ` ${made.code}` : ''}`);
+          addLog({ kind: 'tech', text: `Created ${x.label} defence card ${plan.name}${made.code ? ` (${made.code})` : ''}` });
+        }
+        st.site.protectionCards = (await fetchPage(gameBase() + '/cards', 'technologies')).props.protectionCards || st.site.protectionCards;
+      }
       if (st.mode === 'edit') await post(`/technologies/${st.editing.id}`, v, { method: 'PATCH', json: true });
       else await post('/technologies', v, { json: true });
       // Re-read the site and check what it actually saved.
@@ -318,14 +453,16 @@ window.RHComposer = function createComposer(deps) {
       addLog({ kind: 'tech', tech: saved.name, text: `${st.mode === 'edit' ? 'Edited' : 'Added'} ${saved.name} (${treeLabel(saved.tree)} tree)${saved.prerequisites && saved.prerequisites.length ? `, needs ${saved.prerequisites.join('; ')}` : ''}` });
       st.msg = off.length
         ? { ok: false, html: `Saved, but the site didn’t take the ${off.map(k => label[k]).join(', ')}. ${st.mode === 'edit' ? 'It may not allow editing those; remove the tech and add it again instead.' : 'Check it on the Cards page.'}` }
-        : { ok: true, html: `${st.mode === 'edit' ? 'Saved' : 'Added'} <b>${esc(saved.name)}</b>. It will appear on the tree in a moment.` };
+        : { ok: true, html: `${st.mode === 'edit' ? 'Saved' : 'Added'} <b>${esc(saved.name)}</b>${madeCards.length ? (plan.type === 'equipment' ? `, with the new ${esc(plan.name)} equipment card` : `, with the new ${esc(madeCards.join(' and '))} ${esc(plan.name)} defence card${madeCards.length > 1 ? 's' : ''}`) : ''}. It will appear on the tree in a moment.` };
       if (!off.length && st.mode === 'new') { st.chips = []; build(); followTree(); }
       if (st.mode === 'edit') st.editing = { ...st.editing, ...saved, prerequisites: saved.prerequisites || [] };
       refreshNow();
       setTimeout(() => select(saved.name, true), 1500);
     } catch (e) {
       console.error(e);
-      st.msg = { ok: false, html: `Couldn’t ${st.mode === 'edit' ? 'save' : 'add'} it: ${esc(e.message)}` };
+      st.msg = { ok: false, html: `Couldn’t ${st.mode === 'edit' ? 'save' : 'add'} it: ${esc(e.message)}${madeCards.length ? (plan.type === 'equipment'
+        ? ` The ${esc(plan.name)} equipment card was created; remove it from the Equipment list on the Cards page if you don’t want it.`
+        : ` The ${esc(madeCards.join(' and '))} ${esc(plan.name)} card${madeCards.length > 1 ? 's were' : ' was'} created; remove ${madeCards.length > 1 ? 'them' : 'it'} in the Protection Card catalogue if you don’t want ${madeCards.length > 1 ? 'them' : 'it'}.`) : ''}` };
     } finally {
       st.busy = false; render();
     }
