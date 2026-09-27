@@ -29,6 +29,7 @@
       </select>
       <button type="submit" class="btn">Refresh now</button>
       <button type="button" class="btn" id="pause">Pause</button>
+      <button type="button" class="btn primary" id="newResearch">New research…</button>
     </form>
     <div class="banner" id="banner" hidden></div>
   </header>
@@ -36,6 +37,46 @@
   <section>
     <div class="sec-head"><h2>Where each corp stands</h2><span class="mini" id="corpNote"></span></div>
     <div class="corps" id="corps"></div>
+  </section>
+
+  <section class="rtable" id="rtable">
+    <div class="sec-head">
+      <h2>Research table</h2>
+      <span class="mini" id="rtStatus"></span>
+    </div>
+    <p class="banner" id="rtError" hidden></p>
+    <div class="rt-grid">
+      <div id="rtNow"></div>
+      <div id="rtSuggest"></div>
+    </div>
+    <ol class="rt-seats" id="rtSeats"></ol>
+    <form class="rt-settings" id="rtSettings">
+      <label class="switch" for="rtAuto"><input type="checkbox" id="rtAuto"> Skip automatically</label>
+      <label for="rtMode">Time limit
+        <select id="rtMode">
+          <option value="fixed">Fixed</option>
+          <option value="suggested">Follow the suggestion</option>
+        </select>
+      </label>
+      <label for="rtLimit">Seconds per turn <input type="number" id="rtLimit" min="10" step="5"></label>
+      <label for="rtCards">Cards per turn <input type="number" id="rtCards" min="1" step="1"></label>
+      <label for="rtReserve">Reserve at the end <input type="number" id="rtReserve" min="0" step="15"> s</label>
+    </form>
+  </section>
+
+  <section class="handouts" id="handouts">
+    <div class="sec-head">
+      <h2>Hand-outs</h2>
+      <span class="mini" id="handoutCount"></span>
+      <label class="switch" for="autoHand"><input type="checkbox" id="autoHand"> Hand out automatically</label>
+    </div>
+    <p class="hint" id="handoutNote"></p>
+    <p class="banner" id="handoutError" hidden></p>
+    <ol class="holist" id="handoutList"><li class="empty">Checking what is owed…</li></ol>
+    <details id="handoutDone" hidden>
+      <summary id="handoutDoneCount">Done</summary>
+      <ol class="holist" id="handoutDoneList"></ol>
+    </details>
   </section>
 
   <section>
@@ -59,6 +100,10 @@
   <div id="inspBody"></div>
 </aside>
 </div>
+<dialog class="composer" id="composer" aria-label="Research builder"></dialog>
+<script src="composer.js"></script>
+<script src="handouts.js"></script>
+<script src="table.js"></script>
 <script src="tree.js"></script>
 </body>
 </html>

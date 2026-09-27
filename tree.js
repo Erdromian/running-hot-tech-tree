@@ -3,7 +3,7 @@
 // Reads the Control research page (an Inertia app) as JSON using the browser's own sign-in,
 // redraws the trees when anything changes, and keeps a log of what changed between refreshes.
 (() => {
-  const DEFAULT_GAME = 'https://running-hot.megagameadmin.co.uk/control/games/3';
+  const DEFAULT_GAME = 'https://running-hot.megagameadmin.co.uk/control/games/2';
   const TREE_VAR = { augmented: '--t-an', dtc: '--t-dtc', 'genetic-equity': '--t-ge', gordon: '--t-gor', mccullough: '--t-mcm', standard: '--t-std' };
   const NW = 200, NH = 64, COLW = NW + 60, ROWH = NH + 16, PADX = 16, PADY = 34;
   const FRESH_MS = 15 * 60 * 1000;
@@ -42,6 +42,66 @@
     return `${url.origin}${m[1]}/research`;
   }
   const gameKey = () => 'rh.game:' + researchUrl(state.gameUrl);
+  const gameBase = () => researchUrl(state.gameUrl).replace(/\/research$/, '');
+
+  // Laravel wants its XSRF-TOKEN cookie echoed back in a header on every change. The extension reads it
+  // with the cookies permission; on the site itself (for testing) it is readable from document.cookie.
+  const authError = msg => Object.assign(new Error(msg), { auth: true });
+  async function xsrfToken(origin) {
+    const inExtension = typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id;
+    if (inExtension && !chrome.cookies) {
+      // Refreshing the tab loads new code but not new permissions; only reloading the extension does.
+      throw authError('the extension doesn’t have its cookies permission yet. Open chrome://extensions, click the reload arrow on Running Hot Tech Tree, then refresh this tab.');
+    }
+    if (inExtension) {
+      const host = new URL(origin).hostname;
+      const find = async () => {
+        const c = await chrome.cookies.get({ url: origin, name: 'XSRF-TOKEN' });
+        if (c) return c.value;
+        // The cookie may be set on the parent domain rather than the game's own host.
+        const all = await chrome.cookies.getAll({ name: 'XSRF-TOKEN' });
+        const hit = all.find(x => { const d = x.domain.replace(/^\./, ''); return host === d || host.endsWith('.' + d); });
+        return hit ? hit.value : null;
+      };
+      let v = await find();
+      if (!v) {
+        // The token expires with the session's idle timer; loading any page re-issues it.
+        await fetch(gameBase() + '/research', { credentials: 'include', cache: 'no-store' }).catch(() => {});
+        v = await find();
+      }
+      return v ? decodeURIComponent(v) : null;
+    }
+    const mm = document.cookie.match(/(?:^|;\s*)XSRF-TOKEN=([^;]+)/);
+    return mm ? decodeURIComponent(mm[1]) : null;
+  }
+
+  // Sends a change to the game, the same request the site's own buttons make. The site answers a
+  // successful change with a redirect, which is not followed; callers re-read the data to confirm.
+  // With `json`, the site answers validation problems as JSON (422) instead of a redirect.
+  async function postToGame(path, body, { method = 'POST', json = false } = {}) {
+    const base = gameBase();
+    const token = await xsrfToken(new URL(base).origin);
+    if (!token) throw authError('there is no sign-in token for the game site. Sign in to it in this browser.');
+    const r = await fetch(base + path, {
+      method, credentials: 'include', redirect: 'manual', cache: 'no-store',
+      headers: {
+        'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-XSRF-TOKEN': token,
+        ...(json ? { Accept: 'application/json' } : {
+          Accept: 'text/html, application/xhtml+xml', 'X-Inertia': 'true', ...(state.version ? { 'X-Inertia-Version': state.version } : {}),
+        }),
+      },
+      body: JSON.stringify(body),
+    });
+    if (r.status === 419) throw authError('the site refused it: its security token has expired. Reload the game site in this browser, then retry.');
+    if (r.status === 401 || r.status === 403) throw authError(`the site refused it (${r.status}). Check you are signed in as Control.`);
+    if (r.type === 'opaqueredirect' || (r.status >= 200 && r.status < 400)) return;
+    if (r.status === 422) {
+      let msg = '';
+      try { const j = await r.json(); msg = Object.values(j.errors || {}).flat()[0] || ''; } catch { /* not JSON */ }
+      throw new Error(msg || 'the site rejected the details.');
+    }
+    throw new Error(`the site answered ${r.status}.`);
+  }
 
   function parseHtml(html) {
     const doc = new DOMParser().parseFromString(html, 'text/html');
@@ -51,11 +111,12 @@
     return s ? JSON.parse(s.textContent) : null;
   }
 
-  async function fetchPage(url, retry = true) {
+  // Fetches any Control page as its Inertia JSON. `need` is a prop the page must have.
+  async function fetchPage(url, need = 'research', retry = true) {
     const headers = { 'X-Requested-With': 'XMLHttpRequest', Accept: 'text/html, application/xhtml+xml' };
     if (state.version) { headers['X-Inertia'] = 'true'; headers['X-Inertia-Version'] = state.version; }
     const r = await fetch(url, { credentials: 'include', headers, cache: 'no-store' });
-    if (r.status === 409 && retry) { state.version = null; return fetchPage(url, false); }
+    if (r.status === 409 && retry) { state.version = null; return fetchPage(url, need, false); }
     if (r.status === 401 || r.status === 419) throw new SignInError();
     if (/\/login\/?$/.test(new URL(r.url).pathname)) throw new SignInError();
     if (!r.ok) throw new Error(`The game site answered ${r.status}${r.statusText ? ' ' + r.statusText : ''}.`);
@@ -63,7 +124,7 @@
     const page = ct.includes('json') ? await r.json() : parseHtml(await r.text());
     if (!page || !page.props) throw new Error('Could not find the game data on that page. The site may have changed.');
     if (/(^|\/)(login|auth)/i.test(page.component || '')) throw new SignInError();
-    if (!page.props.research) throw new Error('That page has no research data. Check that the game link points at a Control game.');
+    if (!page.props[need]) throw new Error(need === 'research' ? 'That page has no research data. Check that the game link points at a Control game.' : `The ${new URL(url).pathname.split('/').pop()} page is missing ${need}. The site may have changed.`);
     if (page.version) state.version = page.version;
     return page;
   }
@@ -87,7 +148,9 @@
     facs.forEach(f => { const k = normType(f.facility_type); byType[k] = (byType[k] || 0) + f.free; });
     const open = facs.reduce((a, f) => a + f.free, 0);
     const cap = facs.filter(f => f.available !== false).reduce((a, f) => a + (f.capacity || 0), 0);
-    const waiting = c.holdings.filter(h => isUsable(h) && !h.facility_id).length;
+    // Techs waiting for a slot: working ones not yet in a facility, and claimed copies nobody has housed
+    // yet. The site counts an unpaid copy against the corp's slots too.
+    const waiting = c.holdings.filter(h => !h.facility_id && (isUsable(h) || h.status === 'claimed')).length;
     return { facs, byType, open, cap, waiting, free: Math.max(0, open - waiting) };
   }
   function roomFor(space, t) {
@@ -360,9 +423,13 @@
       const stdHave = m.techs.filter(t => t.tree === 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
       const otherHave = m.techs.filter(t => t.tree !== c.slug && t.tree !== 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
       const held = c.holdings.map(h => {
-        const cls = [!isUsable(h) ? 'off' : '', h.origin && h.origin !== 'researched' ? 'copy' : ''].join(' ');
-        const where = !isUsable(h) ? `${h.status_label || h.status || 'Not working'} · not working` : h.facility || 'Not in a facility';
-        return `<li class="${cls}" data-origin="${esc(h.origin_label || '')}"><span class="n">${esc(h.name)}</span><span class="f">${esc(where)}</span></li>`;
+        const cls = [!isUsable(h) && !needsPlace(h) ? 'off' : '', needsPlace(h) ? 'unplaced' : '', h.origin && h.origin !== 'researched' ? 'copy' : ''].join(' ');
+        // Claimed = a traded or stolen copy the corp hasn't paid for yet. It takes a slot but doesn't work
+        // until its research player pays the cost less the discount.
+        const where = h.status === 'claimed'
+          ? `${h.facility_id ? h.facility : 'Needs a facility'} · not paid for yet${h.discount_percent ? ` (${h.discount_percent}% off)` : ''}`
+          : !isUsable(h) ? `${h.status_label || h.status || 'Not working'} · not working` : h.facility || 'Not in a facility';
+        return `<li class="${cls}" data-origin="${esc(h.origin_label || '')}"><span class="n">${esc(h.name)}</span><span class="f">${esc(where)}</span>${needsPlace(h) ? placeHTML(c, h) : ''}</li>`;
       }).join('') || '<li><span class="n">Nothing held</span></li>';
       const sums = {}; m.suits.forEach(s => { sums[s.value] = 0; });
       c.hand.forEach(card => { if (sums[card.suit] != null) sums[card.suit] += +card.value || 0; });
@@ -389,7 +456,8 @@
       const spaceHead = sp.free
         ? `<b>${sp.free} of ${sp.cap} slots free</b>${typesFree ? ` · empty: ${typesFree}` : ''}`
         : `<b class="bad">No free slots</b> · ${sp.cap} slots, all used`;
-      const waitNote = sp.waiting ? `<span class="warnline">${sp.waiting} tech${sp.waiting === 1 ? ' is' : 's are'} not in a facility yet and will take a slot</span>` : '';
+      const unhoused = c.holdings.filter(h => h.status === 'claimed' && !h.facility_id);
+      const waitNote = sp.waiting ? `<span class="warnline">${sp.waiting} tech${sp.waiting === 1 ? ' is' : 's are'} not in a facility yet and will take a slot${unhoused.length ? `: ${unhoused.map(h => esc(h.name)).join(', ')}. Place ${unhoused.length === 1 ? 'it' : 'them'} below` : ''}</span>` : '';
       return `<article class="corp" style="${cv(c.color)}">
         <h3><span class="sw"></span>${esc(c.name)}</h3>
         <div class="pos">${beyond ? `<b>${beyond} tech${beyond === 1 ? '' : 's'} beyond the start</b>` : '<b>Starting techs only</b>'} · own tree ${ownHave}/${ownTotal} · Standard ${stdHave}/${stdTotal}${otherHave ? ` · ${otherHave} from other trees` : ''}</div>
@@ -406,7 +474,52 @@
       </article>`;
     }).join('');
     $('corps').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go, true)));
+    $('corps').querySelectorAll('[data-place]').forEach(b => b.addEventListener('click', () => placeHolding(b)));
     $('corps').querySelectorAll('[data-focus]').forEach(b => b.addEventListener('click', () => setFocus(+b.dataset.focus)));
+  }
+
+  // ---------- Placing techs in facilities ----------
+  // A tech needs placing when it isn't in a facility and is either working or claimed for the corp.
+  // Claimed copies (traded or stolen, not yet paid for) take a slot either way; stolen-from techs are
+  // out of the building and can't be placed.
+  const needsPlace = h => !h.facility_id && (isUsable(h) || h.status === 'claimed');
+  // The same facilities the Research page offers: available, with a free slot, of the required type.
+  const placeOptions = (c, h) => c.facilities.filter(f => f.available !== false && (f.stored || 0) < (f.capacity || 0)
+    && (!h.required_facility_type_id || f.facility_type_id === h.required_facility_type_id));
+  const placeMsgs = {};
+
+  function placeHTML(c, h) {
+    const opts = placeOptions(c, h);
+    const msg = placeMsgs[h.id] ? `<span class="place-msg ${placeMsgs[h.id].ok ? 'ok' : 'bad'}">${esc(placeMsgs[h.id].text)}</span>` : '';
+    if (!opts.length) return `<div class="place"><span class="bad">No free slot${h.required_facility_type ? ` in a ${esc(h.required_facility_type)} facility` : ''}</span>${msg}</div>`;
+    return `<div class="place">
+      <select id="place-${h.id}" aria-label="Facility to place ${esc(h.name)} in"><option value="">Place in…</option>${opts.map(f => `<option value="${f.id}">${esc(f.name)} (${esc(f.facility_type)}, ${f.stored}/${f.capacity})</option>`).join('')}</select>
+      <button type="button" class="btn" data-place="${h.id}" data-corp="${c.id}">Place</button>${msg}
+    </div>`;
+  }
+
+  async function placeHolding(btn) {
+    const id = +btn.dataset.place, sel = $('place-' + id);
+    const facilityId = sel && +sel.value;
+    if (!facilityId) { sel && sel.focus(); return; }
+    const c = state.model.corpById.get(+btn.dataset.corp);
+    const h = c && c.holdings.find(x => x.id === id);
+    const f = c && c.facilities.find(x => x.id === facilityId);
+    btn.disabled = true; btn.textContent = 'Placing…'; sel.disabled = true;
+    try {
+      await postToGame(`/technology-holdings/${id}`, { facility_id: facilityId }, { method: 'PATCH' });
+      // Check it landed before saying so.
+      const page = await fetchPage(researchUrl(state.gameUrl));
+      const now = page.props.research.corporations.flatMap(x => x.holdings).find(x => x.id === id);
+      if (!now || now.facility_id !== facilityId) throw new Error(Object.values(page.props.errors || {}).flat()[0] || 'the site didn’t move it.');
+      placeMsgs[id] = { ok: true, text: `Placed in ${f ? f.name : 'the facility'}` };
+      addLog({ kind: 'move', corp: c.id, tech: h ? h.name : undefined, text: `Placed ${h ? h.name : 'a tech'} in ${f ? f.name : 'a facility'} for ${c.name}` });
+    } catch (e) {
+      placeMsgs[id] = { ok: false, text: `Couldn’t place it: ${e.message}` };
+    }
+    clearTimeout(state.timer);
+    state.hash = null;
+    refresh();
   }
 
   // ---------- Log ----------
@@ -749,6 +862,10 @@
       </dl>
       ${corpBox}
       ${t.kind === 'research' ? `<div class="box"><span class="t">Cost from scratch · ${anc.size + 1} tech${anc.size ? 's' : ''}</span><div class="suits">${costChips(m, total)}</div><span class="mini">${sum} Research Points in total${anc.size ? `, including ${esc([...anc].join(', '))}` : ''}</span></div>` : ''}`;
+    if (t.kind === 'research') {
+      $('inspBody').insertAdjacentHTML('beforeend', '<button type="button" class="btn" id="editTech">Edit this tech…</button>');
+      $('editTech').addEventListener('click', () => composer.open('edit', t));
+    }
     $('insp').classList.remove('empty');
     $('inspBody').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go, true)));
     if (scroll) {
@@ -765,6 +882,29 @@
     $('insp').classList.add('empty');
     $('inspBody').innerHTML = HINT;
   }
+
+  // ---------- Hand-outs ----------
+  function addLog(e) {
+    state.log = [{ ...e, t: Date.now() }, ...state.log].slice(0, LOG_MAX);
+    store.set(gameKey() + ':log', state.log);
+    renderLog();
+  }
+  const handouts = window.RHHandouts({
+    store, esc, cv, keyOf: nameKey, fetchPage, gameBase, gameKey, post: postToGame, addLog, select,
+    getModel: () => state.model,
+  });
+  const table = window.RHTable({
+    store, esc, cv, post: postToGame, fetchPage, addLog, getModel: () => state.model,
+    researchPath: () => researchUrl(state.gameUrl),
+    getSkew: () => state.skew,
+    isPaused: () => state.paused,
+    refreshNow: () => { clearTimeout(state.timer); refresh(); },
+  });
+  const composer = window.RHComposer({
+    esc, keyOf: nameKey, getModel: () => state.model, fetchPage, gameBase, post: postToGame, addLog, select,
+    refreshNow: () => { clearTimeout(state.timer); refresh(); },
+    mount: $('composer'),
+  });
 
   // ---------- Orchestration ----------
   function renderAll() {
@@ -812,6 +952,8 @@
         state.model = m;
         renderStatus();
       }
+      table.observe(m);
+      await handouts.update(m);
       setLive(state.paused ? 'paused' : 'ok', state.paused ? 'Paused' : 'Live');
     } catch (e) {
       console.error(e);
@@ -825,7 +967,9 @@
 
   function schedule() {
     clearTimeout(state.timer);
-    if (!state.paused) state.timer = setTimeout(refresh, state.interval * 1000);
+    // While a research sitting is open, check every 2 seconds so turns are timed closely.
+    const every = table.isOpen() ? Math.min(state.interval, 2) : state.interval;
+    if (!state.paused) state.timer = setTimeout(refresh, every * 1000);
   }
 
   // ---------- Controls ----------
@@ -860,15 +1004,17 @@
     state.log = []; store.set(gameKey() + ':log', []);
     if (state.model) { renderLog(); renderTrees(state.model); if (state.selected) select(state.selected, false); }
   });
+  $('autoHand').addEventListener('change', () => handouts.setAuto($('autoHand').checked));
+  $('newResearch').addEventListener('click', () => composer.open('new'));
   $('closeInsp').addEventListener('click', clearSelection);
   document.addEventListener('keydown', e => { if (e.key === 'Escape') clearSelection(); });
   document.addEventListener('click', e => {
-    if (state.selected && !e.target.closest('.node,.start,.insp,.lnk,.log,.corp,.treenav')) clearSelection();
+    if (state.selected && !e.target.closest('.node,.start,.insp,.lnk,.log,.corp,.treenav,.handouts')) clearSelection();
   });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible' && !state.paused && Date.now() - state.lastOk > state.interval * 1000) refresh();
   });
-  setInterval(renderStatus, 1000);
+  setInterval(() => { renderStatus(); table.tick(); }, 1000);
 
   loadGameMemory();
   refresh();
