@@ -26,7 +26,7 @@ Keep this folder where it is. Chrome loads the extension from this folder, so mo
   - its Research Points
   - its current hand added up by suit
   - how many techs it has open in any tree, which are ready now, and which it could pay for but has no room for
-- **Changes:** a log of new research, copies, thefts, cards moved between facilities, Research Point changes, facilities added, lost, resized or made unavailable, and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed. A tech gained in the last 15 minutes gets a **New** tag on the tree.
+- **Changes:** a log of new research, copies, thefts, cards moved between facilities, Research Point changes, facilities added, lost, resized or made unavailable, techs added or edited in Control, and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed. A tech gained in the last 15 minutes gets a **New** tag on the tree.
 - **Trees:**
   - Each tree is laid out in tiers, with its starting techs above.
   - Dashed boxes are prerequisites that come from another tree.
@@ -39,6 +39,14 @@ Keep this folder where it is. Chrome loads the extension from this folder, so mo
 - **Prerequisites:** any working copy counts, however the corp got it: researched, copied or stolen. So a corp can research into another corp's tree once it has stolen or copied the prerequisites, and those options show a dashed outline on its card.
 - **Facility space:** every tech takes one slot. A tech with a *Housed in* type needs a free slot in a facility of that type; any other tech can go in any facility. A tech the corp holds that isn't in a facility yet counts against its free slots.
 - **Affordability** uses Research Points only, not cards still in the hand.
+
+## Custom research
+
+Techs added on the Control **Cards** page appear on the next refresh, in the tree you picked, placed after their prerequisites. The change log records them as "New technology" and they get an **Added** tag for 15 minutes.
+
+- **Prerequisites:** names are matched loosely, so differences in capitalisation, spacing, or straight vs curly apostrophes don't matter.
+- **A prerequisite that doesn't match any tech** (a typo, or research that doesn't exist yet) shows as a red dashed **Not in the game** box, with a warning under that tree. No one can research that tech until a tech with that name exists.
+- **Zero cost:** a custom tech with a cost of 0 is still researchable and appears in the tree. Only cards another tech unlocks (like Honey pot) and deck-customisation rules go in the "not researched directly" note.
 - **Click any tech:** highlights its whole prerequisite chain. The side panel shows its cost, effect, where it must be housed, and the total cost to reach it. If a corp is highlighted, the panel also shows what that corp still needs.
 
 ## If something goes wrong

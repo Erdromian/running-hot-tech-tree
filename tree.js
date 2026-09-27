@@ -72,6 +72,7 @@
   const isUsable = h => h.usable !== false;
   const titleCase = s => String(s).replace(/[-_]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
   const totalCost = t => Object.values(t.cost || {}).reduce((a, b) => a + (+b || 0), 0);
+  const nameKey = s => String(s || '').normalize('NFKC').replace(/[’‘`´]/g, "'").replace(/\s+/g, ' ').trim().toLowerCase();
   // Techs name facility types a little differently from facilities ("ID Facility" vs "ID").
   const normType = s => String(s || '').toLowerCase().replace(/\s*facility$/, '').trim();
 
@@ -104,10 +105,39 @@
       const one = s.label.slice(0, 1).toUpperCase();
       s.abbr = suits.filter(x => x.label.slice(0, 1).toUpperCase() === one).length > 1 ? s.label.slice(0, 2) : one;
     });
-    const techs = (r.technologies || []).map(t => ({ ...t, cost: t.cost || {}, prerequisites: t.prerequisites || [], kids: [] }));
-    const byName = new Map(), byId = new Map();
-    techs.forEach(t => { byName.set(t.name, t); byId.set(t.id, t); });
+    const techs = (r.technologies || []).map(t => ({
+      ...t,
+      cost: t.cost || {},
+      // Control types prerequisites as titles separated by semicolons; accept either form.
+      prerequisites: (Array.isArray(t.prerequisites) ? t.prerequisites : String(t.prerequisites || '').split(';')).map(n => String(n).trim()).filter(Boolean),
+      kids: [],
+      unknown: [],
+    }));
+    const byName = new Map(), byId = new Map(), byKey = new Map();
+    techs.forEach(t => { byName.set(t.name, t); byId.set(t.id, t); if (!byKey.has(nameKey(t.name))) byKey.set(nameKey(t.name), t); });
+    // Resolve typed prerequisite names to real techs, forgiving case, spacing and curly quotes.
+    // Names that match nothing (typos, or research that doesn't exist yet) are kept as unknown.
+    techs.forEach(t => {
+      t.prerequisites = t.prerequisites.map(n => {
+        const q = byKey.get(nameKey(n));
+        if (q) return q.name;
+        t.unknown.push(n);
+        return n;
+      });
+    });
     techs.forEach(t => t.prerequisites.forEach(n => { const q = byName.get(n); if (q) q.kids.push(t.name); }));
+    // Cards some tech unlocks (Honey pot, Honey bomb) aren't researched themselves.
+    const unlocked = new Set();
+    techs.forEach(t => {
+      for (const mm of String(t.effect || '').matchAll(/Unlock:\s*([^.]+)/gi)) {
+        mm[1].split(/,|\band\b/).forEach(n => { if (n.trim()) unlocked.add(nameKey(n)); });
+      }
+    });
+    techs.forEach(t => {
+      t.kind = t.starting ? 'start'
+        : t.is_deck_customisation || (t.is_free && unlocked.has(nameKey(t.name))) ? 'extra'
+        : 'research';
+    });
 
     const slugOfCorp = new Map();
     techs.forEach(t => { if (t.corporation && !slugOfCorp.has(t.corporation)) slugOfCorp.set(t.corporation, t.tree); });
@@ -159,7 +189,7 @@
   function optionsFor(m, c, scope) {
     const have = m.usableBy.get(c.id) || new Set();
     return m.techs
-      .filter(t => !t.is_free && !have.has(t.name) && (!scope || scope.has(t.tree)))
+      .filter(t => t.kind === 'research' && !have.has(t.name) && (!scope || scope.has(t.tree)))
       .map(t => {
         const missing = t.prerequisites.filter(n => !have.has(n));
         const short = m.suits.filter(s => (t.cost[s.value] || 0) > (c.points[s.value] || 0));
@@ -180,6 +210,7 @@
       facs: Object.fromEntries(m.corps.flatMap(c => c.facilities.map(f => [f.id, {
         corp: c.id, name: f.name, type: f.facility_type, cap: f.capacity, available: f.available !== false,
       }]))),
+      techs: Object.fromEntries(m.techs.map(t => [t.id, { name: t.name, tree: t.tree, pre: t.prerequisites.join('; ') }])),
     };
   }
 
@@ -228,13 +259,32 @@
         if (!b.facs[id]) ev.push({ kind: 'loss', corp: o.corp, text: `${cn(o.corp)} lost ${o.name} (${o.type})` });
       }
     }
+    // Custom research added or edited in Control.
+    if (a.techs && b.techs) {
+      const tn = slug => treeName(m, slug);
+      for (const [id, t] of Object.entries(b.techs)) {
+        const o = a.techs[id];
+        if (!o) { ev.push({ kind: 'tech', tech: t.name, text: `New technology: ${t.name} (${tn(t.tree)} tree)${t.pre ? `, needs ${t.pre}` : ''}` }); continue; }
+        if (o.name !== t.name) ev.push({ kind: 'tech', tech: t.name, text: `Technology renamed: ${o.name} → ${t.name}` });
+        if (o.tree !== t.tree) ev.push({ kind: 'tech', tech: t.name, text: `${t.name} moved to the ${tn(t.tree)} tree` });
+        if (o.pre !== t.pre) ev.push({ kind: 'tech', tech: t.name, text: `${t.name} now needs ${t.pre || 'nothing'}` });
+      }
+      for (const [id, o] of Object.entries(a.techs)) {
+        if (!b.techs[id]) ev.push({ kind: 'loss', text: `Technology removed: ${o.name}` });
+      }
+    }
     const now = Date.now();
     return ev.map(e => ({ ...e, t: now }));
   }
 
+  // Recently gained techs get a "New" tag, recently added custom techs an "Added" tag. Map of name → tag.
   function freshTechs() {
-    const cut = Date.now() - FRESH_MS, out = new Set();
-    state.log.forEach(e => { if (e.kind === 'gain' && e.t >= cut) out.add(e.tech); });
+    const cut = Date.now() - FRESH_MS, out = new Map();
+    [...state.log].reverse().forEach(e => {
+      if (e.t < cut || !e.tech) return;
+      if (e.kind === 'gain') out.set(e.tech, 'New');
+      else if (e.kind === 'tech' && e.text.startsWith('New technology') && !out.has(e.tech)) out.set(e.tech, 'Added');
+    });
     return out;
   }
 
@@ -303,12 +353,12 @@
       const blocked = open.filter(o => o.afford && !o.room);
       const cheapest = open.filter(o => !o.afford).sort((a, b) => a.total - b.total).slice(0, 3);
       const sp = c.space;
-      const beyond = c.holdings.filter(h => { const t = m.byId.get(h.technology_type_id) || m.byName.get(h.name); return t && !t.starting && !t.is_free && isUsable(h); }).length;
-      const ownTotal = c.slug ? m.techs.filter(t => t.tree === c.slug && !t.is_free).length : 0;
-      const ownHave = c.slug ? m.techs.filter(t => t.tree === c.slug && !t.is_free && m.usableBy.get(c.id).has(t.name)).length : 0;
-      const stdTotal = m.techs.filter(t => t.tree === 'standard' && !t.is_free).length;
-      const stdHave = m.techs.filter(t => t.tree === 'standard' && !t.is_free && m.usableBy.get(c.id).has(t.name)).length;
-      const otherHave = m.techs.filter(t => t.tree !== c.slug && t.tree !== 'standard' && !t.is_free && m.usableBy.get(c.id).has(t.name)).length;
+      const beyond = c.holdings.filter(h => { const t = m.byId.get(h.technology_type_id) || m.byName.get(h.name); return t && t.kind === 'research' && isUsable(h); }).length;
+      const ownTotal = c.slug ? m.techs.filter(t => t.tree === c.slug && t.kind === 'research').length : 0;
+      const ownHave = c.slug ? m.techs.filter(t => t.tree === c.slug && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length : 0;
+      const stdTotal = m.techs.filter(t => t.tree === 'standard' && t.kind === 'research').length;
+      const stdHave = m.techs.filter(t => t.tree === 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
+      const otherHave = m.techs.filter(t => t.tree !== c.slug && t.tree !== 'standard' && t.kind === 'research' && m.usableBy.get(c.id).has(t.name)).length;
       const held = c.holdings.map(h => {
         const cls = [!isUsable(h) ? 'off' : '', h.origin && h.origin !== 'researched' ? 'copy' : ''].join(' ');
         const where = !isUsable(h) ? `${h.status_label || h.status || 'Not working'} · not working` : h.facility || 'Not in a facility';
@@ -364,7 +414,7 @@
     const m = state.model;
     $('changeCount').textContent = state.log.length ? `${state.log.length} recorded` : '';
     if (!state.log.length) {
-      $('log').innerHTML = '<li class="empty">No changes yet. New research, copies, thefts, moves, Research Points, facility changes and phase changes will appear here as they happen.</li>';
+      $('log').innerHTML = '<li class="empty">No changes yet. New research, copies, thefts, moves, Research Points, facility changes, technologies added in Control and phase changes will appear here as they happen.</li>';
       return;
     }
     $('log').innerHTML = state.log.map(e => {
@@ -427,7 +477,7 @@
         else if (o.afford) tag = `<span class="tag nospace" title="No free ${esc(slotWord(t))} slot">No space</span>`;
       }
     }
-    if (!ghost && ctx.fresh.has(t.name)) { cls.push('fresh'); tag = '<span class="tag new">New</span>'; }
+    if (!ghost && ctx.fresh.has(t.name)) { cls.push('fresh'); tag = `<span class="tag new">${ctx.fresh.get(t.name)}</span>`; }
     b.className = cls.join(' ');
     b.style.cssText = `${cv(ghost ? treeCol(m, t.tree) : treeCol(m, treeSlug))};--nw:${NW}px;--nh:${NH}px`;
     b.innerHTML = ghost
@@ -437,6 +487,16 @@
     if (ghost) b.dataset.ghost = '1';
     b.addEventListener('click', () => select(t.name, ghost));
     regNode(t.name, b);
+    return b;
+  }
+
+  function makeMissing(name) {
+    const b = document.createElement('div');
+    b.className = 'node ghost missing';
+    b.style.cssText = `--c:var(--warn);--nw:${NW}px;--nh:${NH}px`;
+    b.innerHTML = `<div class="top"><span class="cd">Not in the game</span></div><div class="nm">${esc(name)}</div><div class="cost"><span>No tech has this name</span></div>`;
+    b.title = `${name} · no technology has this name yet. Check the spelling in Control, or add it.`;
+    b.dataset.ghost = '1';
     return b;
   }
 
@@ -455,17 +515,23 @@
     m.trees.forEach(tree => {
       const key = tree.slug;
       const all = tree.techs;
-      const starts = all.filter(t => t.starting);
-      const extras = all.filter(t => t.is_free && !t.starting);
-      const res = all.filter(t => !t.is_free);
+      const starts = all.filter(t => t.kind === 'start');
+      const extras = all.filter(t => t.kind === 'extra');
+      const res = all.filter(t => t.kind === 'research');
       const inTree = n => m.byName.has(n) && m.byName.get(n).tree === key;
       const hasLink = t => t.prerequisites.length > 0 || t.kids.some(inTree);
       const graph = res.filter(hasLink), solo = res.filter(t => !hasLink(t));
 
       // Nodes: in-tree techs plus a ghost for each prerequisite that lives in another tree.
       const N = {};
-      graph.forEach(t => { N[t.name] = { t, ghost: false, parents: t.prerequisites.filter(n => m.byName.has(n)).map(n => inTree(n) ? n : 'g:' + n) }; });
-      graph.forEach(t => t.prerequisites.filter(n => m.byName.has(n) && !inTree(n)).forEach(n => { N['g:' + n] = { t: m.byName.get(n), ghost: true, parents: [] }; }));
+      // Prerequisites that match no tech get a "missing" ghost so the gap is visible instead of silently dropped.
+      const pid = n => !m.byName.has(n) ? 'u:' + nameKey(n) : inTree(n) ? n : 'g:' + n;
+      graph.forEach(t => { N[t.name] = { t, ghost: false, parents: t.prerequisites.map(pid) }; });
+      graph.forEach(t => t.prerequisites.filter(n => !inTree(n)).forEach(n => {
+        N[pid(n)] = m.byName.has(n)
+          ? { t: m.byName.get(n), ghost: true, parents: [] }
+          : { t: { name: n, tree: null, cost: {}, code: '' }, ghost: true, missing: true, parents: [] };
+      }));
       const ids = Object.keys(N);
       const depth = id => { const o = N[id]; if (o.depth != null) return o.depth; o.depth = 0; o.depth = o.parents.length ? 1 + Math.max(...o.parents.map(depth)) : 0; return o.depth; };
       ids.forEach(depth);
@@ -516,6 +582,12 @@
       sec.className = 'tree'; sec.id = 'tree-' + key; sec.style.cssText = cv(tree.color) + (fc ? `;--fc:${fc.color}` : '');
       const haveCount = fc ? res.filter(t => ctx.have.has(t.name)).length : null;
       sec.innerHTML = `<div class="tree-head"><h2>${esc(tree.name)}</h2><span class="count">${res.length} techs · deepest chain ${maxD + 1} step${maxD ? 's' : ''}${fc ? ` · ${esc(fc.name)} holds ${haveCount}` : ''}</span></div>`;
+      const broken = all.filter(t => t.unknown.length);
+      if (broken.length) {
+        const p = document.createElement('p'); p.className = 'warnnote';
+        p.innerHTML = `<b>Prerequisite not in the game:</b> ${broken.map(t => `${esc(t.name)} needs ${t.unknown.map(n => `“${esc(n)}”`).join(', ')}`).join('; ')}. No one can research ${broken.length === 1 ? 'it' : 'these'} until a tech with that exact name exists. Check the spelling in Control.`;
+        sec.appendChild(p);
+      }
 
       if (starts.length) {
         const sl = document.createElement('div');
@@ -553,7 +625,7 @@
           const o = N[i];
           const x = PADX + o.depth * COLW, yy = PADY + Y[i];
           pos[i] = { x, y: yy };
-          const el = makeNode(m, o.t, o.ghost, key, ctx);
+          const el = o.missing ? makeMissing(o.t.name) : makeNode(m, o.t, o.ghost, key, ctx);
           el.style.left = x + 'px'; el.style.top = yy + 'px';
           canvas.appendChild(el);
         });
@@ -563,8 +635,8 @@
           const path = document.createElementNS(svgNS, 'path');
           path.setAttribute('d', `M${x1},${y1} C${x1 + dx},${y1} ${x2 - dx},${y2} ${x2},${y2}`);
           const done = fc && ctx.have.has(N[p].t.name) && ctx.have.has(N[i].t.name);
-          path.setAttribute('class', 'edge' + (N[p].ghost ? ' x' : '') + (done ? ' done' : ''));
-          path.style.cssText = cv(N[p].ghost ? treeCol(m, N[p].t.tree) : tree.color);
+          path.setAttribute('class', 'edge' + (N[p].ghost ? ' x' : '') + (N[p].missing ? ' missing' : '') + (done ? ' done' : ''));
+          path.style.cssText = cv(N[p].missing ? 'var(--warn)' : N[p].ghost ? treeCol(m, N[p].t.tree) : tree.color);
           svg.appendChild(path);
           edgeEls.push({ from: N[p].t.name, to: N[i].t.name, el: path });
         }));
@@ -626,6 +698,7 @@
     const have = fc ? m.usableBy.get(fc.id) : new Set();
     const link = n => {
       const x = m.byName.get(n);
+      if (!x) return `<span class="lnk miss" title="No technology has this name yet">${esc(n)} · not in the game</span>`;
       const cls = fc ? (have.has(n) ? ' have' : ' miss') : '';
       return `<button type="button" class="lnk${cls}" data-go="${esc(n)}" style="${cv(x ? treeCol(m, x.tree) : 'var(--faint)')}"><span class="sw"></span>${esc(n)}</button>`;
     };
@@ -635,7 +708,7 @@
     const sum = Object.values(total).reduce((a, b) => a + b, 0);
 
     let corpBox = '';
-    if (fc && !t.is_free) {
+    if (fc && t.kind === 'research') {
       if (have.has(name)) corpBox = `<div class="box"><span class="t">${esc(fc.name)}</span><span>Already holds this.</span></div>`;
       else {
         const todo = [name, ...anc].filter(n => !have.has(n));
@@ -644,7 +717,8 @@
         const short = m.suits.filter(s => (t.cost[s.value] || 0) > (fc.points[s.value] || 0));
         const sp = fc.space, room = roomFor(sp, t);
         const typeFree = t.required_facility_type ? Math.min(sp.byType[normType(t.required_facility_type)] || 0, sp.free) : sp.free;
-        const verdict = missing.length ? `Needs ${missing.length} more prerequisite${missing.length === 1 ? '' : 's'} first.`
+        const verdict = t.unknown.length ? `Can’t be researched yet: ${t.unknown.map(n => `“${n}”`).join(', ')} ${t.unknown.length === 1 ? 'is' : 'are'} not in the game.`
+          : missing.length ? `Needs ${missing.length} more prerequisite${missing.length === 1 ? '' : 's'} first.`
           : short.length ? `Prerequisites met. Short on ${short.map(s => `${s.label} by ${(t.cost[s.value] || 0) - (fc.points[s.value] || 0)}`).join(', ')}.`
           : room ? 'Ready: prerequisites met, it can pay, and it has space.'
           : `Prerequisites met and it can pay, but it has no free ${slotWord(t)} slot.`;
@@ -667,14 +741,14 @@
       </div>
       <dl>
         <dt>Effect</dt><dd>${esc(t.effect || '—')}</dd>
-        <dt>Cost</dt><dd>${t.is_free ? (t.starting ? 'Starting tech, no cost' : 'No research cost') : `<div class="suits">${costChips(m, t.cost)}</div>`}</dd>
+        <dt>Cost</dt><dd>${t.kind !== 'research' ? (t.kind === 'start' ? 'Starting tech, no cost' : 'No research cost') : `<div class="suits">${costChips(m, t.cost)}</div>`}</dd>
         <dt>Housed in</dt><dd>${esc(t.required_facility_type || 'Anywhere')}</dd>
         <dt>Needs</dt><dd>${t.prerequisites.length ? `<div class="links">${t.prerequisites.map(link).join('')}</div>` : 'Nothing'}</dd>
         <dt>Leads to</dt><dd>${t.kids.length ? `<div class="links">${t.kids.map(link).join('')}</div>` : 'Nothing'}</dd>
         <dt>Held by</dt><dd>${heldBy}</dd>
       </dl>
       ${corpBox}
-      ${!t.is_free ? `<div class="box"><span class="t">Cost from scratch · ${anc.size + 1} tech${anc.size ? 's' : ''}</span><div class="suits">${costChips(m, total)}</div><span class="mini">${sum} Research Points in total${anc.size ? `, including ${esc([...anc].join(', '))}` : ''}</span></div>` : ''}`;
+      ${t.kind === 'research' ? `<div class="box"><span class="t">Cost from scratch · ${anc.size + 1} tech${anc.size ? 's' : ''}</span><div class="suits">${costChips(m, total)}</div><span class="mini">${sum} Research Points in total${anc.size ? `, including ${esc([...anc].join(', '))}` : ''}</span></div>` : ''}`;
     $('insp').classList.remove('empty');
     $('inspBody').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go, true)));
     if (scroll) {
