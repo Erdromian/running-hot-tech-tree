@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Running Hot Tech Tree</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="tree.css">
+</head>
+<body>
+<div class="wrap">
+<div class="main">
+  <header class="top">
+    <div class="topbar">
+      <span class="eyebrow" id="gameName">Running Hot</span>
+      <span class="live" id="live"><span class="dot"></span><span id="liveText">Connecting…</span></span>
+    </div>
+    <h1>Tech Tree</h1>
+    <div class="status" id="status"></div>
+    <form class="controls" id="controls">
+      <label for="gameUrl">Game</label>
+      <input id="gameUrl" type="url" spellcheck="false" required>
+      <label for="interval">Refresh</label>
+      <select id="interval">
+        <option value="5">every 5 s</option>
+        <option value="10">every 10 s</option>
+        <option value="30">every 30 s</option>
+        <option value="60">every minute</option>
+      </select>
+      <button type="submit" class="btn">Refresh now</button>
+      <button type="button" class="btn" id="pause">Pause</button>
+    </form>
+    <div class="banner" id="banner" hidden></div>
+  </header>
+
+  <section>
+    <div class="sec-head"><h2>Where each corp stands</h2><span class="mini" id="corpNote"></span></div>
+    <div class="corps" id="corps"></div>
+  </section>
+
+  <section>
+    <details class="changes" id="changesBox" open>
+      <summary><h2>Changes</h2><span class="mini" id="changeCount"></span></summary>
+      <ol class="log" id="log"></ol>
+      <button type="button" class="btn quiet" id="clearLog">Clear the log</button>
+    </details>
+  </section>
+
+  <nav class="treenav" aria-label="Highlight and jump">
+    <div class="row" id="focusRow"></div>
+    <div class="row" id="treeLinks"></div>
+  </nav>
+  <div class="legend" id="legend"></div>
+  <div id="trees" class="trees"></div>
+</div>
+
+<aside class="insp empty" id="insp" aria-live="polite">
+  <button class="btn quiet close" id="closeInsp" type="button">Close</button>
+  <div id="inspBody"></div>
+</aside>
+</div>
+<script src="tree.js"></script>
+</body>
+</html>

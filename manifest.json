@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Running Hot Tech Tree",
+  "version": "1.0.0",
+  "description": "Live research tech tree for Running Hot. Reads the Control research page with your existing sign-in and keeps the tree up to date.",
+  "action": {
+    "default_title": "Open the live tech tree",
+    "default_icon": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" }
+  },
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "background": { "service_worker": "background.js" },
+  "host_permissions": ["https://*.megagameadmin.co.uk/*"]
+}
