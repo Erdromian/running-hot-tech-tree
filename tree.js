@@ -72,6 +72,28 @@
   const isUsable = h => h.usable !== false;
   const titleCase = s => String(s).replace(/[-_]+/g, ' ').replace(/\b\w/g, m => m.toUpperCase());
   const totalCost = t => Object.values(t.cost || {}).reduce((a, b) => a + (+b || 0), 0);
+  // Techs name facility types a little differently from facilities ("ID Facility" vs "ID").
+  const normType = s => String(s || '').toLowerCase().replace(/\s*facility$/, '').trim();
+
+  // Every tech a corp holds takes a slot in one of its facilities. Techs it holds that are
+  // usable but not in a facility yet are still waiting for a slot, so they count against the free total.
+  function spaceOf(c) {
+    const facs = (c.facilities || []).map(f => ({
+      ...f,
+      free: f.available === false ? 0 : Math.max(0, (f.capacity || 0) - (f.stored || 0)),
+    }));
+    const byType = {};
+    facs.forEach(f => { const k = normType(f.facility_type); byType[k] = (byType[k] || 0) + f.free; });
+    const open = facs.reduce((a, f) => a + f.free, 0);
+    const cap = facs.filter(f => f.available !== false).reduce((a, f) => a + (f.capacity || 0), 0);
+    const waiting = c.holdings.filter(h => isUsable(h) && !h.facility_id).length;
+    return { facs, byType, open, cap, waiting, free: Math.max(0, open - waiting) };
+  }
+  function roomFor(space, t) {
+    if (space.free <= 0) return false;
+    return t.required_facility_type ? (space.byType[normType(t.required_facility_type)] || 0) > 0 : true;
+  }
+  const slotWord = t => t.required_facility_type ? `${t.required_facility_type.replace(/\s*facility$/i, '')} facility` : 'facility';
 
   function buildModel(page) {
     const p = page.props, r = p.research;
@@ -91,7 +113,9 @@
     techs.forEach(t => { if (t.corporation && !slugOfCorp.has(t.corporation)) slugOfCorp.set(t.corporation, t.tree); });
     const corps = (r.corporations || []).map(c => {
       const slug = slugOfCorp.get(c.name) || null;
-      return { ...c, slug, points: c.points || {}, hand: c.hand || [], holdings: c.holdings || [], color: treeColor(slug, c) };
+      const corp = { ...c, slug, points: c.points || {}, hand: c.hand || [], holdings: c.holdings || [], facilities: c.facilities || [], color: treeColor(slug, c) };
+      corp.space = spaceOf(corp);
+      return corp;
     });
     const corpById = new Map(corps.map(c => [c.id, c]));
 
@@ -130,7 +154,8 @@
     return JSON.stringify([m.r, ph.id, ph.turn, ph.type, ph.status, ph.ends_at, m.game.name]);
   }
 
-  // Options for one corp: techs it could go for, whether prerequisites are met and whether it can pay now.
+  // Options for one corp: techs it could go for, whether prerequisites are met, whether it can pay now,
+  // and whether it has a free facility slot to house the result. Ready means all three.
   function optionsFor(m, c, scope) {
     const have = m.usableBy.get(c.id) || new Set();
     return m.techs
@@ -138,7 +163,8 @@
       .map(t => {
         const missing = t.prerequisites.filter(n => !have.has(n));
         const short = m.suits.filter(s => (t.cost[s.value] || 0) > (c.points[s.value] || 0));
-        return { t, missing, short, open: !missing.length, afford: !missing.length && !short.length, total: totalCost(t) };
+        const open = !missing.length, afford = open && !short.length, room = roomFor(c.space, t);
+        return { t, missing, short, open, afford, room, ready: afford && room, total: totalCost(t) };
       });
   }
 
@@ -150,6 +176,9 @@
       corps: Object.fromEntries(m.corps.map(c => [c.id, { name: c.name, points: { ...c.points } }])),
       holds: Object.fromEntries(m.corps.flatMap(c => c.holdings.map(h => [h.id, {
         corp: c.id, name: h.name, status: h.status, statusLabel: h.status_label, origin: h.origin, originLabel: h.origin_label, facility: h.facility, usable: isUsable(h),
+      }]))),
+      facs: Object.fromEntries(m.corps.flatMap(c => c.facilities.map(f => [f.id, {
+        corp: c.id, name: f.name, type: f.facility_type, cap: f.capacity, available: f.available !== false,
       }]))),
     };
   }
@@ -185,6 +214,19 @@
       const parts = m.suits.filter(s => (o.points[s.value] || 0) !== (c.points[s.value] || 0))
         .map(s => `${s.label} ${o.points[s.value] || 0} → ${c.points[s.value] || 0}`);
       if (parts.length) ev.push({ kind: 'points', corp: +id, text: `${c.name} Research Points: ${parts.join(', ')}` });
+    }
+    // Snapshots saved before facilities were tracked have no facs; skip rather than report every facility as new.
+    if (a.facs && b.facs) {
+      for (const [id, f] of Object.entries(b.facs)) {
+        const o = a.facs[id];
+        const slots = n => `${n} slot${n === 1 ? '' : 's'}`;
+        if (!o) { ev.push({ kind: 'space', corp: f.corp, text: `${cn(f.corp)} added ${f.name} (${f.type}, ${slots(f.cap)})` }); continue; }
+        if (o.cap !== f.cap) ev.push({ kind: 'space', corp: f.corp, text: `${cn(f.corp)}’s ${f.name}: ${slots(o.cap)} → ${slots(f.cap)}` });
+        if (o.available !== f.available) ev.push({ kind: f.available ? 'space' : 'loss', corp: f.corp, text: `${cn(f.corp)}’s ${f.name} is ${f.available ? 'available again' : 'unavailable'}` });
+      }
+      for (const [id, o] of Object.entries(a.facs)) {
+        if (!b.facs[id]) ev.push({ kind: 'loss', corp: o.corp, text: `${cn(o.corp)} lost ${o.name} (${o.type})` });
+      }
     }
     const now = Date.now();
     return ev.map(e => ({ ...e, t: now }));
@@ -253,17 +295,20 @@
 
   // ---------- Corps ----------
   function renderCorps(m) {
-    $('corpNote').textContent = 'Options count the corp’s own tree plus Standard';
+    $('corpNote').textContent = 'Options cover every tree: prerequisites can be researched, copied or stolen';
     $('corps').innerHTML = m.corps.map(c => {
-      const scope = new Set([c.slug, 'standard'].filter(Boolean));
-      const opts = optionsFor(m, c, scope);
-      const open = opts.filter(o => o.open), afford = open.filter(o => o.afford).sort((a, b) => a.total - b.total);
+      const opts = optionsFor(m, c, null);
+      const open = opts.filter(o => o.open);
+      const ready = open.filter(o => o.ready).sort((a, b) => a.total - b.total);
+      const blocked = open.filter(o => o.afford && !o.room);
       const cheapest = open.filter(o => !o.afford).sort((a, b) => a.total - b.total).slice(0, 3);
+      const sp = c.space;
       const beyond = c.holdings.filter(h => { const t = m.byId.get(h.technology_type_id) || m.byName.get(h.name); return t && !t.starting && !t.is_free && isUsable(h); }).length;
       const ownTotal = c.slug ? m.techs.filter(t => t.tree === c.slug && !t.is_free).length : 0;
       const ownHave = c.slug ? m.techs.filter(t => t.tree === c.slug && !t.is_free && m.usableBy.get(c.id).has(t.name)).length : 0;
       const stdTotal = m.techs.filter(t => t.tree === 'standard' && !t.is_free).length;
       const stdHave = m.techs.filter(t => t.tree === 'standard' && !t.is_free && m.usableBy.get(c.id).has(t.name)).length;
+      const otherHave = m.techs.filter(t => t.tree !== c.slug && t.tree !== 'standard' && !t.is_free && m.usableBy.get(c.id).has(t.name)).length;
       const held = c.holdings.map(h => {
         const cls = [!isUsable(h) ? 'off' : '', h.origin && h.origin !== 'researched' ? 'copy' : ''].join(' ');
         const where = !isUsable(h) ? `${h.status_label || h.status || 'Not working'} · not working` : h.facility || 'Not in a facility';
@@ -273,17 +318,39 @@
       c.hand.forEach(card => { if (sums[card.suit] != null) sums[card.suit] += +card.value || 0; });
       const handTotal = Object.values(sums).reduce((a, b) => a + b, 0);
       const wild = c.hand.filter(card => card.wild).length;
-      const lnk = o => `<button type="button" class="lnk" data-go="${esc(o.t.name)}" style="${cv(treeCol(m, o.t.tree))}"><span class="sw"></span>${esc(o.t.name)} <span class="mini">${o.total}</span></button>`;
+      // Options from another corp's tree are marked, since those usually rest on stolen or copied prerequisites.
+      const lnk = o => {
+        const foreign = o.t.tree !== c.slug && o.t.tree !== 'standard';
+        const title = `${o.t.name} · ${treeName(m, o.t.tree)} tree · ${o.total} points`;
+        return `<button type="button" class="lnk${foreign ? ' foreign' : ''}" data-go="${esc(o.t.name)}" style="${cv(treeCol(m, o.t.tree))}" title="${esc(title)}"><span class="sw"></span>${esc(o.t.name)} <span class="mini">${o.total}</span></button>`;
+      };
       const pressed = state.focusCorp === c.id;
+      const facRows = sp.facs.map(f => {
+        const used = Math.min(f.stored || 0, f.capacity || 0);
+        const slots = (f.capacity || 0) <= 12
+          ? `<span class="slots">${Array.from({ length: f.capacity || 0 }, (_, i) => `<i class="${i < used ? 'used' : ''}"></i>`).join('')}</span>`
+          : '';
+        return `<li class="${f.available === false ? 'off' : f.free ? '' : 'full'}"><span class="n">${esc(f.name)}</span><span class="ty">${esc(f.facility_type)}</span>${slots}<span class="ct">${f.available === false ? 'unavailable' : `${f.stored || 0}/${f.capacity || 0}`}</span></li>`;
+      }).join('');
+      const typesFree = Object.entries(sp.byType).filter(([, n]) => n > 0).map(([k, n]) => {
+        const f = sp.facs.find(x => normType(x.facility_type) === k);
+        return `${n} ${esc(f ? f.facility_type : titleCase(k))}`;
+      }).join(' · ');
+      const spaceHead = sp.free
+        ? `<b>${sp.free} of ${sp.cap} slots free</b>${typesFree ? ` · empty: ${typesFree}` : ''}`
+        : `<b class="bad">No free slots</b> · ${sp.cap} slots, all used`;
+      const waitNote = sp.waiting ? `<span class="warnline">${sp.waiting} tech${sp.waiting === 1 ? ' is' : 's are'} not in a facility yet and will take a slot</span>` : '';
       return `<article class="corp" style="${cv(c.color)}">
         <h3><span class="sw"></span>${esc(c.name)}</h3>
-        <div class="pos">${beyond ? `<b>${beyond} tech${beyond === 1 ? '' : 's'} beyond the start</b>` : '<b>Starting techs only</b>'} · own tree ${ownHave}/${ownTotal} · Standard ${stdHave}/${stdTotal}</div>
+        <div class="pos">${beyond ? `<b>${beyond} tech${beyond === 1 ? '' : 's'} beyond the start</b>` : '<b>Starting techs only</b>'} · own tree ${ownHave}/${ownTotal} · Standard ${stdHave}/${stdTotal}${otherHave ? ` · ${otherHave} from other trees` : ''}</div>
         <ul class="held">${held}</ul>
+        <div class="sub"><span class="mini">Facility space</span><span class="spacehead">${spaceHead}</span>${waitNote}<ul class="facs">${facRows || '<li><span class="n">No facilities</span></li>'}</ul></div>
         <div class="sub"><span class="mini">Research Points</span><div class="suits">${m.suits.map(s => `<span class="chip rp${c.points[s.value] ? '' : ' zero'}">${c.points[s.value] || 0} ${esc(s.label)}</span>`).join('')}</div></div>
         <div class="sub"><span class="mini">Hand: ${c.hand.length} cards, ${handTotal} points${wild ? `, ${wild} wild` : ''} · deck ${c.deck_remaining ?? '?'}</span><div class="suits">${m.suits.map(s => `<span class="chip${sums[s.value] ? '' : ' zero'}">${sums[s.value]} ${esc(s.label)}</span>`).join('')}</div></div>
-        <div class="sub"><span class="mini">${open.length} open · ${afford.length} affordable now</span>
-          ${afford.length ? `<div class="opts">${afford.slice(0, 8).map(lnk).join('')}${afford.length > 8 ? `<span class="mini">+${afford.length - 8} more</span>` : ''}</div>`
+        <div class="sub"><span class="mini">${open.length} open · ${ready.length} ready now (prerequisites, points and space)</span>
+          ${ready.length ? `<div class="opts">${ready.slice(0, 8).map(lnk).join('')}${ready.length > 8 ? `<span class="mini">+${ready.length - 8} more</span>` : ''}</div>`
             : cheapest.length ? `<span class="mini">Cheapest open:</span><div class="opts">${cheapest.map(lnk).join('')}</div>` : ''}
+          ${blocked.length ? `<span class="warnline">${blocked.length} more affordable but no free slot for ${blocked.length === 1 ? 'it' : 'them'}:</span><div class="opts">${blocked.slice(0, 6).map(lnk).join('')}</div>` : ''}
         </div>
         <button type="button" class="btn" data-focus="${c.id}" aria-pressed="${pressed}">${pressed ? 'Highlighted on the tree' : 'Highlight on the tree'}</button>
       </article>`;
@@ -297,7 +364,7 @@
     const m = state.model;
     $('changeCount').textContent = state.log.length ? `${state.log.length} recorded` : '';
     if (!state.log.length) {
-      $('log').innerHTML = '<li class="empty">No changes yet. New research, copies, thefts, moves, Research Points and phase changes will appear here as they happen.</li>';
+      $('log').innerHTML = '<li class="empty">No changes yet. New research, copies, thefts, moves, Research Points, facility changes and phase changes will appear here as they happen.</li>';
       return;
     }
     $('log').innerHTML = state.log.map(e => {
@@ -317,7 +384,7 @@
     $('treeLinks').innerHTML = `<span class="lbl">Jump to</span>` + m.trees.map(t => `<a href="#tree-${esc(t.slug)}" style="${cv(t.color)}"><span class="sw"></span>${esc(t.name)}</a>`).join('');
     $('focusRow').querySelectorAll('[data-focus]').forEach(b => b.addEventListener('click', () => setFocus(b.dataset.focus ? +b.dataset.focus : null)));
     const base = `<span><i class="h"></i>Held (pips show who: solid researched, hollow copy, striped not working)</span><span><i></i>Not held</span><span><i class="g"></i>Prerequisite from another tree</span>`;
-    const focus = fc ? `<span><i class="m"></i>${esc(fc.name)} holds it</span><span><i class="o"></i>Prerequisites met</span><span><i class="a"></i>Prerequisites met and affordable now</span>` : '';
+    const focus = fc ? `<span><i class="m"></i>${esc(fc.name)} holds it</span><span><i class="o"></i>Prerequisites met</span><span><i class="a"></i>Ready now: prerequisites, points and a free slot</span><span><b class="tagkey">No space</b>Could pay, but no free slot of the right type</span>` : '';
     $('legend').style.cssText = fc ? `--fc:${fc.color}` : '';
     const key = `<span>Costs: ${m.suits.map(s => `${esc(s.abbr)} ${esc(s.label)}`).join(' · ')}</span>`;
     $('legend').innerHTML = base + focus + key + '<span>Click any tech to trace its prerequisite chain</span>';
@@ -354,7 +421,11 @@
     if (!ghost && ctx.fc) {
       const o = ctx.opt.get(t.name);
       if (ctx.have.has(t.name)) cls.push('mine');
-      else if (o && o.open) { cls.push('open'); if (o.afford) { cls.push('afford'); tag = '<span class="tag afford">Affordable</span>'; } }
+      else if (o && o.open) {
+        cls.push('open');
+        if (o.ready) { cls.push('afford'); tag = '<span class="tag afford">Ready</span>'; }
+        else if (o.afford) tag = `<span class="tag nospace" title="No free ${esc(slotWord(t))} slot">No space</span>`;
+      }
     }
     if (!ghost && ctx.fresh.has(t.name)) { cls.push('fresh'); tag = '<span class="tag new">New</span>'; }
     b.className = cls.join(' ');
@@ -535,7 +606,7 @@
     while (st.length) { const x = st.pop(); if (out.has(x) || !m.byName.has(x)) continue; out.add(x); st.push(...m.byName.get(x)[key]); }
     return out;
   };
-  const HINT = '<p class="hint">Click a tech to see its cost, effect, what it needs, what it leads to, and who holds it. Pick a corp under Highlight to see what that corp still needs.</p>';
+  const HINT = '<p class="hint">Click a tech to see its cost, effect, what it needs, what it leads to, and who holds it. Pick a corp under Highlight to see what that corp still needs, including facility space.</p>';
 
   function select(name, scroll) {
     const m = state.model;
@@ -571,11 +642,18 @@
         const rest = {}; todo.forEach(n => m.suits.forEach(s => { const v = m.byName.get(n).cost[s.value]; if (v) rest[s.value] = (rest[s.value] || 0) + v; }));
         const missing = t.prerequisites.filter(n => !have.has(n));
         const short = m.suits.filter(s => (t.cost[s.value] || 0) > (fc.points[s.value] || 0));
+        const sp = fc.space, room = roomFor(sp, t);
+        const typeFree = t.required_facility_type ? Math.min(sp.byType[normType(t.required_facility_type)] || 0, sp.free) : sp.free;
         const verdict = missing.length ? `Needs ${missing.length} more prerequisite${missing.length === 1 ? '' : 's'} first.`
           : short.length ? `Prerequisites met. Short on ${short.map(s => `${s.label} by ${(t.cost[s.value] || 0) - (fc.points[s.value] || 0)}`).join(', ')}.`
-          : 'Prerequisites met and it can pay now.';
+          : room ? 'Ready: prerequisites met, it can pay, and it has space.'
+          : `Prerequisites met and it can pay, but it has no free ${slotWord(t)} slot.`;
+        const article = /^[aeiou]/i.test(slotWord(t)) ? 'an' : 'a';
+        const spaceLine = `Needs a slot in ${t.required_facility_type ? `${article} ${slotWord(t)}` : 'any facility'}: ${typeFree} free.`
+          + (todo.length > 1 ? ` The whole chain takes ${todo.length} slots; ${sp.free} free in total.` : '');
         corpBox = `<div class="box" style="${cv(fc.color)}"><span class="t" style="display:flex;gap:6px;align-items:center"><span class="sw"></span>For ${esc(fc.name)}</span>
           <span>${esc(verdict)}</span>
+          <span class="${room ? 'mini' : 'warnline'}">${esc(spaceLine)}</span>
           <span class="mini">Cost against current Research Points</span><div class="suits">${costChips(m, t.cost, fc.points)}</div>
           ${todo.length > 1 ? `<span class="mini">Still to research: ${todo.length} techs, ${Object.values(rest).reduce((a, b) => a + b, 0)} points</span><div class="suits">${costChips(m, rest)}</div>` : ''}</div>`;
       }

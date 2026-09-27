@@ -22,15 +22,23 @@ Keep this folder where it is. Chrome loads the extension from this folder, so mo
 - **Header:** turn, phase, time left in the phase, and cards left in the public deck.
 - **One card per corp:**
   - every tech it holds and where it's housed, with copied, stolen and not-working cards marked
+  - its facility space: every facility with its type and used/total slots, how many slots are free, and a warning when a tech it holds isn't in a facility yet
   - its Research Points
   - its current hand added up by suit
-  - how many techs it has open in its own tree plus Standard, and which ones it can afford now
-- **Changes:** a log of new research, copies, thefts, cards moved between facilities, Research Point changes and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed. A tech gained in the last 15 minutes gets a **New** tag on the tree.
+  - how many techs it has open in any tree, which are ready now, and which it could pay for but has no room for
+- **Changes:** a log of new research, copies, thefts, cards moved between facilities, Research Point changes, facilities added, lost, resized or made unavailable, and phase changes, with times. It's saved in the browser, so reopening the tab shows what changed while it was closed. A tech gained in the last 15 minutes gets a **New** tag on the tree.
 - **Trees:**
   - Each tree is laid out in tiers, with its starting techs above.
   - Dashed boxes are prerequisites that come from another tree.
   - Coloured pips on a tech show who holds it: solid for researched, hollow for a copy, striped for not working.
-- **Highlight a corp:** shows what it holds, what it has the prerequisites for (dashed outline), and what it can afford right now.
+- **Highlight a corp:** shows what it holds, what it has the prerequisites for (dashed outline), and what is **Ready** now. A tech tagged **No space** is one it could pay for but has no free slot of the right facility type for.
+
+## The rules it assumes
+
+- **Ready now** means three things: the corp holds every prerequisite, its Research Points cover the cost, and it has a free facility slot for the new tech.
+- **Prerequisites:** any working copy counts, however the corp got it: researched, copied or stolen. So a corp can research into another corp's tree once it has stolen or copied the prerequisites, and those options show a dashed outline on its card.
+- **Facility space:** every tech takes one slot. A tech with a *Housed in* type needs a free slot in a facility of that type; any other tech can go in any facility. A tech the corp holds that isn't in a facility yet counts against its free slots.
+- **Affordability** uses Research Points only, not cards still in the hand.
 - **Click any tech:** highlights its whole prerequisite chain. The side panel shows its cost, effect, where it must be housed, and the total cost to reach it. If a corp is highlighted, the panel also shows what that corp still needs.
 
 ## If something goes wrong
