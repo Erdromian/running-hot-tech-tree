@@ -220,6 +220,8 @@ You can also open `docs/demo/demo.html?view=builder` (or `tree`, `handouts`, `ta
 
 To share the demo as one file (a Discord attachment, say), run `node docs/demo/bundle.mjs`. It writes `dist/running-hot-tech-tree.html` with every script and the stylesheet inlined; it opens in any browser from disk.
 
+For somewhere that previews only images (Discord shows an HTML file as a download), run `node docs/demo/tree-images.mjs`. It writes one PNG per research tree to `dist/trees/`, trees only, each as wide as it needs.
+
 ## If something goes wrong
 
 - **"Signed out"**: sign in to the game site again in this browser. The tree picks it up on the next refresh.
