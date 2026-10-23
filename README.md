@@ -218,6 +218,8 @@ node docs/demo/screenshots.mjs
 
 You can also open `docs/demo/demo.html?view=builder` (or `tree`, `handouts`, `table`, `corp`, `give`) in Chrome to try the UI without signing in.
 
+To share the demo as one file (a Discord attachment, say), run `node docs/demo/bundle.mjs`. It writes `dist/running-hot-tech-tree.html` with every script and the stylesheet inlined; it opens in any browser from disk.
+
 ## If something goes wrong
 
 - **"Signed out"**: sign in to the game site again in this browser. The tree picks it up on the next refresh.
